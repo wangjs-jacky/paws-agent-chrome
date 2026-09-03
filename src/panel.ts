@@ -69,12 +69,14 @@ async function initialize(): Promise<void> {
     if (saved) {
         try {
             const parsed = JSON.parse(saved) as Partial<LocalConfig>;
+            const savedServerUrl = typeof parsed.serverUrl === 'string' ? parsed.serverUrl : '';
             config = {
-                serverUrl: normalizeServerUrl(parsed.serverUrl),
+                serverUrl: normalizeServerUrl(savedServerUrl),
                 machineId: typeof parsed.machineId === 'string' ? parsed.machineId : '',
                 directory: typeof parsed.directory === 'string' ? parsed.directory : '',
                 sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : '',
             };
+            if (config.serverUrl !== savedServerUrl) await saveConfig();
         } catch {
             await storage.remove(CONFIG_KEY);
         }

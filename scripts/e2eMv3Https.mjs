@@ -11,7 +11,9 @@ const exec = promisify(execFile);
 const caseId = 'PAWS-CHROME-HTTPS-01';
 const extensionDir = resolve('dist');
 const serverUrl = 'https://47.115.228.20:8443';
+const legacyServerUrl = 'http://47.115.228.20:3005';
 const hostUrl = 'https://paws-extension-e2e.invalid/';
+const configKey = 'paws-agent.chrome.config';
 const artifactDir = resolve('test-results/paws-agent-chrome-mv3-https');
 const recording = process.env.PAWS_EXTENSION_E2E_RECORD === '1';
 const screenshotPath = resolve(artifactDir, 'linked-over-https.png');
@@ -85,16 +87,36 @@ try {
 
     stage('open HTTPS host and expand injected bubble');
     await page.goto(hostUrl, { waitUntil: 'domcontentloaded' });
-    const frameHost = page.locator('iframe[data-paws-agent-bubble="true"]');
+    let frameHost = page.locator('iframe[data-paws-agent-bubble="true"]');
     await frameHost.waitFor({ state: 'visible' });
-    const frameUrl = await frameHost.getAttribute('src');
+    let frameUrl = await frameHost.getAttribute('src');
     assert.match(frameUrl ?? '', /^chrome-extension:\/\//, 'the real extension frame must be loaded');
+    let extensionFrame = page.frames().find(frame => frame.url() === frameUrl);
+    assert.ok(extensionFrame, 'the extension frame must be available to seed legacy storage');
+    await extensionFrame.evaluate(async ({ key, legacyUrl }) => {
+        await chrome.storage.local.set({
+            [key]: JSON.stringify({ serverUrl: legacyUrl, machineId: '', directory: '', sessionId: '' }),
+        });
+    }, { key: configKey, legacyUrl: legacyServerUrl });
+
+    stage('reload and migrate legacy production configuration');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    frameHost = page.locator('iframe[data-paws-agent-bubble="true"]');
+    await frameHost.waitFor({ state: 'visible' });
+    frameUrl = await frameHost.getAttribute('src');
+    extensionFrame = page.frames().find(frame => frame.url() === frameUrl);
+    assert.ok(extensionFrame, 'the reloaded extension frame must be available');
 
     const bubble = page.frameLocator('#paws-agent-bubble-frame');
     await bubble.getByRole('button', { name: '打开 Paws Agent' }).click();
     await bubble.getByText('把这个浏览器连接到 Paws').waitFor();
     const serverInput = bubble.getByLabel('Server URL');
     assert.equal(await serverInput.inputValue(), serverUrl, 'the production server URL must use the trusted HTTPS origin');
+    const savedConfig = await extensionFrame.evaluate(async key => {
+        const result = await chrome.storage.local.get(key);
+        return result[key];
+    }, configKey);
+    assert.equal(JSON.parse(savedConfig).serverUrl, serverUrl, 'the migrated production server URL must be persisted');
 
     stage('request account link over HTTPS');
     await bubble.getByRole('button', { name: '生成绑定二维码' }).click();
@@ -157,6 +179,7 @@ process.stdout.write(JSON.stringify({
     assertions: [
         'real chrome-extension frame injection',
         'trusted HTTPS production origin is the default',
+        'legacy production origin is migrated in chrome.storage',
         'account-link request is not blocked as mixed content',
         'QR code becomes visible',
     ],

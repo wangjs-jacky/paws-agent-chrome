@@ -16,6 +16,7 @@
     "build": "node scripts/build.mjs",
     "test": "vitest run",
     "test:smoke": "node scripts/smoke.mjs",
+    "test:production:https": "node scripts/checkProductionHttps.mjs",
     "test:e2e": "pnpm run build && node scripts/e2e.mjs",
     "test:e2e:mv3": "pnpm run build && node scripts/e2eMv3Https.mjs",
     "test:e2e:mv3:record": "PAWS_EXTENSION_E2E_RECORD=1 pnpm run test:e2e:mv3",
