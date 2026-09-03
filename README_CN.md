@@ -26,11 +26,14 @@ pnpm verify
 ```bash
 pnpm test:e2e
 pnpm test:e2e:record
+pnpm test:e2e:mv3
+pnpm test:e2e:mv3:record
 pnpm test:e2e:ego
 pnpm test:e2e:ego:record
 ```
 
 - `PAWS-CHROME-BUBBLE-01`：使用临时本地协议服务，覆盖绑定、凭证保存、机器选择、目录授权、网页上下文、远端回复、重连与权限边界。
+- `PAWS-CHROME-HTTPS-01`：在 HTTPS 宿主页中加载真实 Manifest V3 扩展，覆盖受信任的 `https://47.115.228.20:8443` 默认地址、主机权限、绑定请求和二维码渲染，防止 Mixed Content 回归。
 - `PAWS-EGO-LITE-HOST-01`：使用 Ego Lite 一次性浏览器配置，验证真实扩展 iframe、`chrome.storage` 和浏览器完整重启后的重连，不接触用户日常配置，也不连接生产账号。
 
 历史真机验收截图和录像保存在 [`docs/evidence`](docs/evidence)。

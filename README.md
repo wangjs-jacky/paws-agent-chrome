@@ -37,11 +37,15 @@ pnpm test
 pnpm test:smoke
 pnpm test:e2e
 pnpm test:e2e:record
+pnpm test:e2e:mv3
+pnpm test:e2e:mv3:record
 pnpm test:e2e:ego
 pnpm test:e2e:ego:record
 ```
 
 `PAWS-CHROME-BUBBLE-01` exercises the built extension UI against a temporary local protocol server. It covers QR linking, encrypted credentials, machine selection, directory approval, page context, session creation, remote replies, reset, reconnect after reload, and the trusted-client-only approval boundary.
+
+`PAWS-CHROME-HTTPS-01` loads the real Manifest V3 extension inside an HTTPS host page. It protects the trusted `https://47.115.228.20:8443` default, host permission, account-link request, and QR rendering against mixed-content regressions.
 
 `PAWS-EGO-LITE-HOST-01` launches Ego Lite with a disposable profile and the unpacked extension. It verifies a real `chrome-extension://` iframe, real `chrome.storage`, the encrypted SDK flow, and reconnect after a full browser restart. It never modifies the regular Ego Lite profile or connects to production.
 

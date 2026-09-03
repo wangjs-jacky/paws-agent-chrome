@@ -13,6 +13,12 @@ if (manifest.manifest_version !== 3 || !manifest.content_scripts?.[0]?.js?.inclu
 if (manifest.host_permissions?.some(permission => /localhost|127\.0\.0\.1/.test(permission))) {
     throw new Error('Production extension manifest must not expose localhost host permissions');
 }
+if (!manifest.host_permissions?.includes('https://47.115.228.20:8443/*')) {
+    throw new Error('Production extension manifest must allow the trusted HTTPS service origin');
+}
+if (manifest.host_permissions?.some(permission => permission.startsWith('http://47.115.228.20:'))) {
+    throw new Error('Production extension manifest must not allow the legacy plaintext service origin');
+}
 
 const server = createServer(async (request, response) => {
     const path = request.url === '/' ? null : request.url?.replace(/^\//, '').split('?')[0];

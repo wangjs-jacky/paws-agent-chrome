@@ -52,6 +52,7 @@ jobs:
       - run: pnpm build
       - run: pnpm test:smoke
       - run: pnpm test:e2e
+      - run: pnpm test:e2e:mv3
       - name: Upload E2E evidence
         if: always()
         uses: actions/upload-artifact@v4
