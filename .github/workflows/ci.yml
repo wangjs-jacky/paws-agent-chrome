@@ -30,7 +30,7 @@ jobs:
       - run: pnpm build
       - name: Upload unpacked extension
         if: matrix.node == 24
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: paws-agent-chrome-unpacked
           path: dist/
@@ -55,7 +55,7 @@ jobs:
       - run: pnpm test:e2e:mv3
       - name: Upload E2E evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: paws-agent-chrome-e2e
           path: test-results/
