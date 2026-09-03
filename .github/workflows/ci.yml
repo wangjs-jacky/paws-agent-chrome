@@ -49,6 +49,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install chromium --with-deps
+      - run: pnpm build
       - run: pnpm test:smoke
       - run: pnpm test:e2e
       - name: Upload E2E evidence
