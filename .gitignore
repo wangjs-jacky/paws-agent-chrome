@@ -1,0 +1,10 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+coverage/
+.DS_Store
+*.log
+
+# Local extraction source; the committed minimal SDK snapshot is vendor/sdk.
+vendor/paws-agent/

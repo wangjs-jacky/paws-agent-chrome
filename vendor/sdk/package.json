@@ -1,0 +1,24 @@
+{
+  "name": "@wangjs-jacky/paws-agent",
+  "version": "0.1.0-beta.1",
+  "private": true,
+  "description": "Pinned browser runtime subset for Paws Agent Chrome",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./browser": "./src/browser.ts"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@noble/ciphers": "^2.0.1",
+    "@noble/hashes": "^1.8.0",
+    "@stablelib/base64": "^2.0.1",
+    "axios": "^1.13.2",
+    "socket.io-client": "^4.8.1",
+    "tweetnacl": "^1.0.3"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}
