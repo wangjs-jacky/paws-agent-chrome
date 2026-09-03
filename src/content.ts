@@ -24,8 +24,6 @@ if (window === window.top && !document.getElementById(FRAME_ID)) {
         transition: 'width 180ms ease, height 180ms ease, border-radius 180ms ease',
         overflow: 'hidden',
     });
-    document.documentElement.append(frame);
-
     const panelOrigin = new URL(frame.src).origin;
     window.addEventListener('message', event => {
         if (event.source !== frame.contentWindow || event.origin !== panelOrigin) return;
@@ -41,7 +39,11 @@ if (window === window.top && !document.getElementById(FRAME_ID)) {
         if (message.type === 'paws:bubble:request-context') sendPageContext(frame);
     });
 
-    frame.addEventListener('load', () => sendPageContext(frame));
+    frame.addEventListener('load', () => {
+        frame.contentWindow?.postMessage({ type: 'paws:bubble:host-ready' }, panelOrigin);
+        sendPageContext(frame);
+    });
+    document.documentElement.append(frame);
 }
 
 function sendPageContext(frame: HTMLIFrameElement): void {

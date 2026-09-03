@@ -6,6 +6,7 @@ import {
 import QRCode from 'qrcode';
 import { createChromeStorage } from './chromeStorage';
 import { composePrompt, type PageContext } from './pageContext';
+import { DEFAULT_SERVER_URL, normalizeServerUrl } from './serverUrl';
 
 type Phase = 'booting' | 'signedOut' | 'linking' | 'connecting' | 'ready';
 
@@ -16,7 +17,6 @@ type LocalConfig = {
     sessionId: string;
 };
 
-const DEFAULT_SERVER_URL = 'http://47.115.228.20:3005';
 const CONFIG_KEY = 'paws-agent.chrome.config';
 const storage = createChromeStorage();
 const credentials = new BrowserCredentialProvider(storage);
@@ -51,9 +51,13 @@ let linkController: AbortController | null = null;
 window.addEventListener('message', event => {
     if (event.source !== window.parent) return;
     const message = event.data as { type?: unknown; context?: unknown } | null;
+    if (message?.type === 'paws:bubble:host-ready') {
+        syncHostState();
+        return;
+    }
     if (message?.type !== 'paws:page-context' || !isPageContext(message.context)) return;
     pageContext = message.context;
-    if (expanded) render();
+    if (expanded && phase === 'ready') render();
 });
 
 window.addEventListener('beforeunload', () => {
@@ -69,12 +73,14 @@ async function initialize(): Promise<void> {
     if (saved) {
         try {
             const parsed = JSON.parse(saved) as Partial<LocalConfig>;
+            const savedServerUrl = typeof parsed.serverUrl === 'string' ? parsed.serverUrl : '';
             config = {
-                serverUrl: typeof parsed.serverUrl === 'string' ? parsed.serverUrl : DEFAULT_SERVER_URL,
+                serverUrl: normalizeServerUrl(savedServerUrl),
                 machineId: typeof parsed.machineId === 'string' ? parsed.machineId : '',
                 directory: typeof parsed.directory === 'string' ? parsed.directory : '',
                 sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : '',
             };
+            if (config.serverUrl !== savedServerUrl) await saveConfig();
         } catch {
             await storage.remove(CONFIG_KEY);
         }
@@ -279,9 +285,9 @@ function renderComposer(): HTMLElement {
 
 async function beginLink(): Promise<void> {
     if (!config.serverUrl.trim()) return;
+    config.serverUrl = normalizeServerUrl(config.serverUrl);
     busy = true;
     errorText = '';
-    await saveConfig();
     linkController?.abort();
     const controller = new AbortController();
     linkController = controller;
@@ -292,6 +298,7 @@ async function beginLink(): Promise<void> {
         statusText = '正在生成绑定码';
         busy = false;
         render();
+        await saveConfig();
         const link = await startBrowserAccountLink({
             serverUrl: config.serverUrl,
             credentials,
@@ -424,9 +431,13 @@ async function resetSession(): Promise<void> {
 
 function setExpanded(value: boolean): void {
     expanded = value;
+    syncHostState();
+    render();
+}
+
+function syncHostState(): void {
     window.parent.postMessage({ type: 'paws:bubble:resize', expanded }, '*');
     if (expanded) window.parent.postMessage({ type: 'paws:bubble:request-context' }, '*');
-    render();
 }
 
 function saveConfig(): Promise<void> {
