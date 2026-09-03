@@ -51,9 +51,13 @@ let linkController: AbortController | null = null;
 window.addEventListener('message', event => {
     if (event.source !== window.parent) return;
     const message = event.data as { type?: unknown; context?: unknown } | null;
+    if (message?.type === 'paws:bubble:host-ready') {
+        syncHostState();
+        return;
+    }
     if (message?.type !== 'paws:page-context' || !isPageContext(message.context)) return;
     pageContext = message.context;
-    if (expanded) render();
+    if (expanded && phase === 'ready') render();
 });
 
 window.addEventListener('beforeunload', () => {
@@ -284,7 +288,6 @@ async function beginLink(): Promise<void> {
     config.serverUrl = normalizeServerUrl(config.serverUrl);
     busy = true;
     errorText = '';
-    await saveConfig();
     linkController?.abort();
     const controller = new AbortController();
     linkController = controller;
@@ -295,6 +298,7 @@ async function beginLink(): Promise<void> {
         statusText = '正在生成绑定码';
         busy = false;
         render();
+        await saveConfig();
         const link = await startBrowserAccountLink({
             serverUrl: config.serverUrl,
             credentials,
@@ -427,9 +431,13 @@ async function resetSession(): Promise<void> {
 
 function setExpanded(value: boolean): void {
     expanded = value;
+    syncHostState();
+    render();
+}
+
+function syncHostState(): void {
     window.parent.postMessage({ type: 'paws:bubble:resize', expanded }, '*');
     if (expanded) window.parent.postMessage({ type: 'paws:bubble:request-context' }, '*');
-    render();
 }
 
 function saveConfig(): Promise<void> {

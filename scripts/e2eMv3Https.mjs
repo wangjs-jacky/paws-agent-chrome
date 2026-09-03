@@ -89,10 +89,7 @@ try {
     await page.goto(hostUrl, { waitUntil: 'domcontentloaded' });
     let frameHost = page.locator('iframe[data-paws-agent-bubble="true"]');
     await frameHost.waitFor({ state: 'visible' });
-    let frameUrl = await frameHost.getAttribute('src');
-    assert.match(frameUrl ?? '', /^chrome-extension:\/\//, 'the real extension frame must be loaded');
-    let extensionFrame = page.frames().find(frame => frame.url() === frameUrl);
-    assert.ok(extensionFrame, 'the extension frame must be available to seed legacy storage');
+    let extensionFrame = await waitForExtensionFrame(frameHost);
     await extensionFrame.evaluate(async ({ key, legacyUrl }) => {
         await chrome.storage.local.set({
             [key]: JSON.stringify({ serverUrl: legacyUrl, machineId: '', directory: '', sessionId: '' }),
@@ -103,14 +100,15 @@ try {
     await page.reload({ waitUntil: 'domcontentloaded' });
     frameHost = page.locator('iframe[data-paws-agent-bubble="true"]');
     await frameHost.waitFor({ state: 'visible' });
-    frameUrl = await frameHost.getAttribute('src');
-    extensionFrame = page.frames().find(frame => frame.url() === frameUrl);
-    assert.ok(extensionFrame, 'the reloaded extension frame must be available');
+    extensionFrame = await waitForExtensionFrame(frameHost);
 
-    const bubble = page.frameLocator('#paws-agent-bubble-frame');
-    await bubble.getByRole('button', { name: '打开 Paws Agent' }).click();
-    await bubble.getByText('把这个浏览器连接到 Paws').waitFor();
-    const serverInput = bubble.getByLabel('Server URL');
+    const openButton = extensionFrame.getByRole('button', { name: '打开 Paws Agent' });
+    await openButton.waitFor({ state: 'visible' });
+    assert.equal(await openButton.isEnabled(), true, 'the bubble button must be enabled');
+    await openButton.dispatchEvent('click');
+    await waitForExpandedFrame(page);
+    await extensionFrame.getByText('把这个浏览器连接到 Paws').waitFor();
+    const serverInput = extensionFrame.getByLabel('Server URL');
     assert.equal(await serverInput.inputValue(), serverUrl, 'the production server URL must use the trusted HTTPS origin');
     const savedConfig = await extensionFrame.evaluate(async key => {
         const result = await chrome.storage.local.get(key);
@@ -119,14 +117,17 @@ try {
     assert.equal(JSON.parse(savedConfig).serverUrl, serverUrl, 'the migrated production server URL must be persisted');
 
     stage('request account link over HTTPS');
-    await bubble.getByRole('button', { name: '生成绑定二维码' }).click();
+    const generateButton = extensionFrame.getByRole('button', { name: '生成绑定二维码' });
+    await generateButton.waitFor({ state: 'visible' });
+    assert.equal(await generateButton.isEnabled(), true, 'the account-link button must be enabled');
+    await generateButton.dispatchEvent('click');
     try {
-        await bubble.getByAltText('Paws 设备绑定二维码').waitFor({
+        await extensionFrame.getByAltText('Paws 设备绑定二维码').waitFor({
             state: 'visible',
             timeout: recording ? 20_000 : 10_000,
         });
     } catch (cause) {
-        const panelText = await bubble.locator('body').innerText().catch(() => 'panel unavailable');
+        const panelText = await extensionFrame.locator('body').innerText().catch(() => 'panel unavailable');
         throw new Error(`QR code did not appear: ${JSON.stringify({ authRequests, panelText, pageErrors, consoleErrors, requestFailures })}`, { cause });
     }
     if (recording) await page.waitForTimeout(1_000);
@@ -190,6 +191,29 @@ process.stdout.write(JSON.stringify({
 
 function stage(label) {
     process.stderr.write(`[${caseId}] ${label}\n`);
+}
+
+async function waitForExpandedFrame(targetPage) {
+    await targetPage.waitForFunction(() => {
+        const frame = document.querySelector('iframe[data-paws-agent-bubble="true"]');
+        if (!frame) return false;
+        const style = getComputedStyle(frame);
+        return Number.parseFloat(style.width) >= 389 && Number.parseFloat(style.height) >= 639;
+    });
+}
+
+async function waitForExtensionFrame(frameHost, timeoutMs = 10_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const handle = await frameHost.elementHandle();
+        const extensionFrame = await handle?.contentFrame();
+        if (extensionFrame?.url().startsWith('chrome-extension://')) {
+            const ready = await extensionFrame.evaluate(() => document.readyState === 'complete' && Boolean(document.querySelector('#app button'))).catch(() => false);
+            if (ready) return extensionFrame;
+        }
+        await frameHost.page().waitForTimeout(50);
+    }
+    throw new Error('the current injected chrome-extension frame did not finish loading');
 }
 
 async function resolveExecutable(candidates) {

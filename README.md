@@ -48,7 +48,7 @@ pnpm test:e2e:ego:record
 
 `PAWS-CHROME-HTTPS-01` loads the real Manifest V3 extension inside an HTTPS host page. It protects the trusted `https://47.115.228.20:8443` default, host permission, account-link request, and QR rendering against mixed-content regressions.
 
-`pnpm test:production:https` is a release-time live check for the trusted TLS certificate, health route, account-link route, and `/v1/updates` Engine.IO handshake. It creates one transient unauthenticated link request and is intentionally not part of CI.
+`pnpm test:production:https` is a release-time live check for the trusted TLS certificate, health route, account-link route, and `/v1/updates` Engine.IO handshake. It upserts one fixed unauthenticated sentinel link record instead of creating unbounded probe rows, and is intentionally not part of CI.
 
 `PAWS-EGO-LITE-HOST-01` launches Ego Lite with a disposable profile and the unpacked extension. It verifies a real `chrome-extension://` iframe, real `chrome.storage`, the encrypted SDK flow, and reconnect after a full browser restart. It never modifies the regular Ego Lite profile or connects to production.
 
