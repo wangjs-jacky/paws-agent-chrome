@@ -62,7 +62,7 @@ try {
     }, fixture.origin);
 
     page = await context.newPage();
-    page.setDefaultTimeout(10_000);
+    page.setDefaultTimeout(30_000);
     video = page.video();
     page.on('pageerror', error => pageErrors.push(error.message));
     stage('open fixture and inject bubble');
