@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paws-agent-chrome-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Package and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a tag on the main branch
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - name: Package release assets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: pnpm run package:release -- --tag "$RELEASE_TAG"
+      - name: Verify release checksum
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: cd release-artifacts && sha256sum --check "paws-agent-chrome-${RELEASE_TAG}.sha256"
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          ZIP_PATH="release-artifacts/paws-agent-chrome-${RELEASE_TAG}.zip"
+          CHECKSUM_PATH="release-artifacts/paws-agent-chrome-${RELEASE_TAG}.sha256"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$ZIP_PATH" "$CHECKSUM_PATH" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$ZIP_PATH" "$CHECKSUM_PATH" \
+              --verify-tag \
+              --title "$RELEASE_TAG" \
+              --generate-notes
+          fi

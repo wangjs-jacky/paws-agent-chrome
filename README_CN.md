@@ -21,6 +21,24 @@ pnpm verify
 
 构建结果位于 `dist/`，可以通过 `chrome://extensions` 的“加载已解压的扩展程序”安装。
 
+## 安装 Release
+
+1. 从 [GitHub Releases](https://github.com/wangjs-jacky/paws-agent-chrome/releases)
+   下载 `paws-agent-chrome-vX.Y.Z.zip` 及同名 `.sha256` 文件。
+2. 把两个文件放在同一目录并校验：
+
+   ```bash
+   shasum -a 256 -c paws-agent-chrome-vX.Y.Z.sha256
+   ```
+
+3. 将 ZIP 解压到一个长期保留的目录。扩展文件直接位于 ZIP 根目录；Chrome
+   不能直接加载 ZIP。
+4. 打开 `chrome://extensions`，启用“开发者模式”，点击“加载已解压的扩展程序”，
+   选择刚才的解压目录。
+
+升级时，将新 Release 解压到新的长期目录，通过“加载已解压的扩展程序”加载并
+确认正常后，再移除旧版本。
+
 目标选择器会列出全部已绑定机器并标注在线状态，设备名优先使用
 `displayName`、其次使用 `host`。工作目录既可手动输入，也可从历史会话中
 选择，或通过远端目录浏览器逐级选择；每台机器会分别记住最后一次目录。
@@ -45,6 +63,21 @@ pnpm test:e2e:ego:record
 - `PAWS-EGO-LITE-HOST-01`：使用 Ego Lite 一次性浏览器配置，验证真实扩展 iframe、`chrome.storage` 和浏览器完整重启后的重连，不接触用户日常配置，也不连接生产账号。
 
 历史真机验收截图和录像保存在 [`docs/evidence`](docs/evidence)。
+
+## 自动发布
+
+维护者通过 Pull Request 更新 `package.json` 版本。合并后，推送与版本完全一致的
+tag（例如 `v0.0.3`）会触发 Release 工作流。流水线会重新执行验证和生产构建，
+校验版本与权限边界，生成根目录无外层文件夹的 ZIP 及 SHA256 文件，并创建或安全
+更新对应的 GitHub Release。
+
+本地可以执行同一套打包契约：
+
+```bash
+pnpm run package:release -- --tag v0.0.3
+cd release-artifacts
+shasum -a 256 -c paws-agent-chrome-v0.0.3.sha256
+```
 
 ## 安全边界
 
