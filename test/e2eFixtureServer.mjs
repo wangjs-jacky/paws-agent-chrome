@@ -7,6 +7,8 @@ import tweetnacl from 'tweetnacl';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MACHINE_ID = 'paws-e2e-machine';
+const STUDIO_MACHINE_ID = 'paws-studio-machine';
+const RETIRED_MACHINE_ID = 'paws-retired-machine';
 const SESSION_ID = 'paws-e2e-session';
 const TOKEN = 'paws-e2e-token';
 
@@ -20,6 +22,11 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
         sessionCreated: false,
         agentRequestPending: false,
         requestResolutionCalls: 0,
+        browseRequests: [],
+        studioActive: true,
+        studioActiveAt: Date.now() - 1_000,
+        extraRecentPath: null,
+        extraRecentUpdatedAt: 0,
     };
     const messages = [];
     let linkPublicKey = null;
@@ -72,11 +79,12 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
 
             requireAuthorization(request);
             if (url.pathname === '/v1/machines' && request.method === 'GET') {
-                sendJson(response, [machineRecord(secret)]);
+                sendJson(response, machineRecords(secret, state));
                 return;
             }
             if ((url.pathname === '/v1/sessions' || url.pathname === '/v2/sessions/active') && request.method === 'GET') {
-                sendJson(response, { sessions: state.sessionCreated ? [sessionRecord(secret, state)] : [] });
+                const history = historicalSessionRecords(secret, state);
+                sendJson(response, { sessions: state.sessionCreated ? [sessionRecord(secret, state), ...history] : history });
                 return;
             }
             if (url.pathname === `/v3/sessions/${SESSION_ID}/messages` && request.method === 'POST') {
@@ -126,6 +134,17 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
                     acknowledge({ ok: true, result: toBase64(encryptLegacy({ success: true }, secret)) });
                     return;
                 }
+                const browseMachineId = [MACHINE_ID, STUDIO_MACHINE_ID]
+                    .find(machineId => payload?.method === `${machineId}:browseDirectory`);
+                if (browseMachineId) {
+                    const path = typeof params?.path === 'string' ? params.path : '';
+                    state.browseRequests.push({ machineId: browseMachineId, path });
+                    acknowledge({
+                        ok: true,
+                        result: toBase64(encryptLegacy(browseFixtureDirectory(browseMachineId, path), secret)),
+                    });
+                    return;
+                }
                 if (payload?.method !== `${MACHINE_ID}:spawn-happy-session`) {
                     acknowledge({ ok: false, error: 'RPC method not available' });
                     return;
@@ -168,6 +187,16 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
             state.agentRequestPending = true;
             io.emit('update', { body: { t: 'update-session', id: SESSION_ID } });
         },
+        emitStudioActive(active) {
+            state.studioActive = active;
+            state.studioActiveAt = Date.now();
+            io.emit('update', { body: { t: 'update-machine', id: STUDIO_MACHINE_ID } });
+        },
+        emitRecentDirectory(path) {
+            state.extraRecentPath = path;
+            state.extraRecentUpdatedAt = Date.now() + 1_000;
+            io.emit('update', { body: { t: 'new-session', id: 'live-recent-e2e' } });
+        },
         async close() {
             await new Promise(resolve => io.close(resolve));
             if (server.listening) await new Promise(resolve => server.close(resolve));
@@ -175,16 +204,40 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
     };
 }
 
-function machineRecord(secret) {
+function machineRecords(secret, state) {
+    const now = Date.now();
+    return [
+        machineRecord(secret, {
+            id: MACHINE_ID,
+            active: true,
+            activeAt: now,
+            metadata: { displayName: 'E2E Mac mini', host: 'e2e-mac-mini', homeDir: '/Users/e2e' },
+        }),
+        machineRecord(secret, {
+            id: STUDIO_MACHINE_ID,
+            active: state.studioActive,
+            activeAt: state.studioActiveAt,
+            metadata: { host: 'studio-mac.local', homeDir: '/Users/studio' },
+        }),
+        machineRecord(secret, {
+            id: RETIRED_MACHINE_ID,
+            active: false,
+            activeAt: 1,
+            metadata: { host: 'retired-mac.local', homeDir: '/Users/retired' },
+        }),
+    ];
+}
+
+function machineRecord(secret, { id, active, activeAt, metadata }) {
     const now = Date.now();
     return {
-        id: MACHINE_ID,
+        id,
         seq: 1,
         createdAt: now,
         updatedAt: now,
-        active: true,
-        activeAt: now,
-        metadata: toBase64(encryptLegacy({ displayName: 'E2E Mac mini', hostname: 'e2e-mac-mini' }, secret)),
+        active,
+        activeAt,
+        metadata: toBase64(encryptLegacy(metadata, secret)),
         metadataVersion: 1,
         daemonState: null,
         daemonStateVersion: 0,
@@ -217,6 +270,61 @@ function sessionRecord(secret, state) {
         agentStateVersion: state.agentRequestPending ? 1 : 0,
         dataEncryptionKey: null,
     };
+}
+
+function historicalSessionRecords(secret, state) {
+    const now = Date.now();
+    const records = [
+        historicalSessionRecord(secret, 'recent-e2e', MACHINE_ID, '/Users/e2e/recent-project', now - 1_000),
+        historicalSessionRecord(secret, 'older-e2e', MACHINE_ID, '/Users/e2e/older-project', now - 2_000),
+        historicalSessionRecord(secret, 'duplicate-e2e', MACHINE_ID, '/Users/e2e/recent-project', now - 3_000),
+        historicalSessionRecord(secret, 'recent-studio', STUDIO_MACHINE_ID, '/Users/studio/recent-art', now - 500),
+    ];
+    if (state.extraRecentPath) {
+        records.unshift(historicalSessionRecord(
+            secret,
+            'live-recent-e2e',
+            MACHINE_ID,
+            state.extraRecentPath,
+            state.extraRecentUpdatedAt,
+        ));
+    }
+    return records;
+}
+
+function historicalSessionRecord(secret, id, machineId, path, updatedAt) {
+    return {
+        id,
+        seq: 1,
+        createdAt: updatedAt - 1_000,
+        updatedAt,
+        active: false,
+        activeAt: updatedAt,
+        metadata: toBase64(encryptLegacy({ machineId, path }, secret)),
+        metadataVersion: 1,
+        agentState: null,
+        agentStateVersion: 0,
+        dataEncryptionKey: null,
+    };
+}
+
+function browseFixtureDirectory(machineId, requestedPath) {
+    const home = machineId === STUDIO_MACHINE_ID ? '/Users/studio' : '/Users/e2e';
+    const path = requestedPath === '' || requestedPath === '~' ? home : requestedPath;
+    const trees = machineId === STUDIO_MACHINE_ID
+        ? {
+            '/Users/studio': [{ name: 'Work', path: '/Users/studio/Work', isProjectRoot: false }],
+            '/Users/studio/Work': [],
+        }
+        : {
+            '/Users/e2e': [{ name: 'Projects', path: '/Users/e2e/Projects', isProjectRoot: false }],
+            '/Users/e2e/Projects': [{ name: 'paws-chrome', path: '/Users/e2e/Projects/paws-chrome', isProjectRoot: true }],
+            '/Users/e2e/Projects/paws-chrome': [],
+        };
+    const directories = trees[path];
+    if (!directories) return { success: false, error: 'Directory not found in E2E fixture' };
+    const parent = path === home ? null : path.slice(0, path.lastIndexOf('/')) || home;
+    return { success: true, path, parent, home, directories };
 }
 
 function rawMessage(id, seq, localId, content, secret, timestamp) {

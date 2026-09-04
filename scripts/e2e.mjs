@@ -13,6 +13,7 @@ const artifactDir = resolve('test-results/paws-agent-chrome-e2e');
 const recording = process.env.PAWS_EXTENSION_E2E_RECORD === '1';
 const headed = process.env.PAWS_EXTENSION_E2E_HEADED === '1';
 const screenshotPath = resolve(artifactDir, recording ? 'connected-recording.png' : 'connected.png');
+const directoryBrowserPath = resolve(artifactDir, recording ? 'directory-browser-recording.png' : 'directory-browser.png');
 const reconnectPath = resolve(artifactDir, recording ? 'reconnected-recording.png' : 'reconnected.png');
 const rawVideoDir = resolve(artifactDir, 'raw-video');
 const mp4Path = resolve(artifactDir, 'paws-chrome-bubble-e2e.mp4');
@@ -61,7 +62,7 @@ try {
     }, fixture.origin);
 
     page = await context.newPage();
-    page.setDefaultTimeout(10_000);
+    page.setDefaultTimeout(30_000);
     video = page.video();
     page.on('pageerror', error => pageErrors.push(error.message));
     stage('open fixture and inject bubble');
@@ -85,12 +86,58 @@ try {
 
     stage('connect SDK and select remote target');
     await bubble.getByText('已连接').waitFor({ timeout: 15_000 });
+    const machineOptions = await bubble.getByLabel('远端机器').locator('option').allTextContents();
+    assert.deepEqual(machineOptions.slice(0, 2), [
+        'E2E Mac mini · 在线',
+        'studio-mac.local · 在线',
+    ]);
+    assert.match(machineOptions[2] ?? '', /^retired-mac\.local · 离线 · 最后活跃 /);
     await bubble.getByLabel('远端机器').selectOption('paws-e2e-machine');
-    await bubble.getByLabel('远端工作目录').fill('/tmp/paws-e2e-project');
+    await expectInputValue(bubble.getByLabel('远端工作目录'), '/Users/e2e/recent-project');
+    const recentOptions = await bubble.getByLabel('最近使用的远端目录').locator('option').allTextContents();
+    assert.deepEqual(recentOptions, [
+        '选择最近使用的目录…',
+        '/Users/e2e/recent-project',
+        '/Users/e2e/older-project',
+    ]);
+
+    stage('apply realtime machine and recent-directory updates');
+    fixture.emitRecentDirectory('/Users/e2e/live-project');
+    await waitForCondition('new remote session path appears without changing the selected directory', async () => {
+        const options = await bubble.getByLabel('最近使用的远端目录').locator('option').allTextContents();
+        return options[1] === '/Users/e2e/live-project'
+            && await bubble.getByLabel('远端工作目录').inputValue() === '/Users/e2e/recent-project';
+    });
+    const studioOption = bubble.getByLabel('远端机器').locator('option[value="paws-studio-machine"]');
+    fixture.emitStudioActive(false);
+    await waitForCondition('machine turns offline and cannot be selected', async () => {
+        return (await studioOption.textContent())?.includes('离线') === true && await studioOption.isDisabled();
+    });
+    fixture.emitStudioActive(true);
+    await waitForCondition('machine comes back online and can be selected', async () => {
+        return (await studioOption.textContent()) === 'studio-mac.local · 在线' && !await studioOption.isDisabled();
+    });
+
+    stage('browse remote directories through the SDK and keep a per-machine path');
+    await bubble.getByRole('button', { name: '浏览远端目录' }).click();
+    await bubble.getByText('原目录当前不可用，已回到这台机器的主目录。').waitFor();
+    await bubble.getByRole('button', { name: '打开文件夹 Projects' }).click();
+    await bubble.getByRole('button', { name: '打开文件夹 paws-chrome' }).waitFor();
+    await page.screenshot({ path: directoryBrowserPath, fullPage: true });
+    if (recording || headed) await page.waitForTimeout(900);
+    await bubble.getByRole('button', { name: '打开文件夹 paws-chrome' }).click();
+    await bubble.getByRole('button', { name: '使用当前目录' }).click();
+    await expectInputValue(bubble.getByLabel('远端工作目录'), '/Users/e2e/Projects/paws-chrome');
+
+    await bubble.getByLabel('远端机器').selectOption('paws-studio-machine');
+    await expectInputValue(bubble.getByLabel('远端工作目录'), '/Users/studio/recent-art');
+    await bubble.getByLabel('远端机器').selectOption('paws-e2e-machine');
+    await expectInputValue(bubble.getByLabel('远端工作目录'), '/Users/e2e/Projects/paws-chrome');
+
     await bubble.getByPlaceholder('告诉远端 Agent 你想做什么…').fill(marker);
     if (recording || headed) await page.waitForTimeout(900);
     await bubble.getByRole('button', { name: '发送', exact: true }).click();
-    await bubble.getByText('远端目录不存在：/tmp/paws-e2e-project').waitFor();
+    await bubble.getByText('远端目录不存在：/Users/e2e/Projects/paws-chrome').waitFor();
     if (recording || headed) await page.waitForTimeout(900);
     await bubble.getByRole('button', { name: '允许创建并继续' }).click();
 
@@ -104,7 +151,7 @@ try {
     fixture.emitAgentRequest();
     await bubble.getByText('Agent 请求：Bash').waitFor();
     await bubble.getByText('echo paws-e2e-safe-request', { exact: false }).waitFor();
-    await bubble.getByText('/tmp/paws-e2e-project', { exact: false }).waitFor();
+    await bubble.locator('pre.request-payload').filter({ hasText: '/tmp/paws-e2e-project' }).waitFor();
     await bubble.getByText('请在 Paws 自有客户端中审批', { exact: false }).waitFor();
     assert.equal(await bubble.getByRole('button', { name: '允许', exact: true }).count(), 0, 'the host-embedded frame must not expose a request approval control');
     assert.equal(fixture.state.requestResolutionCalls, 0, 'rendering an Agent request must not send a permission RPC');
@@ -112,6 +159,12 @@ try {
     assert.equal(fixture.state.authRequests >= 2, true, 'account link must poll for authorization');
     assert.equal(fixture.state.spawnRequests, 2, 'directory approval must retry the spawn once');
     assert.equal(fixture.state.approvedSpawnRequests, 1, 'the approved spawn must occur exactly once');
+    assert.deepEqual(fixture.state.browseRequests, [
+        { machineId: 'paws-e2e-machine', path: '/Users/e2e/recent-project' },
+        { machineId: 'paws-e2e-machine', path: '' },
+        { machineId: 'paws-e2e-machine', path: '/Users/e2e/Projects' },
+        { machineId: 'paws-e2e-machine', path: '/Users/e2e/Projects/paws-chrome' },
+    ]);
     assert.equal(fixture.state.plainPrompts.length, 1, 'the remote fixture must receive one prompt');
     const prompt = fixture.state.plainPrompts[0];
     assert.match(prompt, /Investigate checkout failure/);
@@ -119,15 +172,32 @@ try {
     assert.match(prompt, /Payment failed with code 42/);
     assert.match(prompt, new RegExp(fixture.origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
-    stage('reset session and verify credential reconnect');
-    await bubble.getByRole('button', { name: '新会话' }).click();
+    stage('change directory and reject an incompatible saved session on reconnect');
+    await bubble.getByLabel('最近使用的远端目录').selectOption('/Users/e2e/older-project');
     await bubble.getByText('从当前网页开始一条远端会话').waitFor();
+    assert.equal(await bubble.getByText('E2E fixture reply: remote session is ready.').count(), 0, 'changing the directory must detach the old conversation');
+    await bubble.getByLabel('远端工作目录').fill('/Users/e2e/Projects/paws-chrome');
+    await bubble.getByLabel('远端工作目录').press('Tab');
+    await bubble.locator('body').evaluate(async () => {
+        const key = 'paws-agent.chrome.config';
+        const stored = await chrome.storage.local.get(key);
+        const config = JSON.parse(stored[key]);
+        config.machineId = 'paws-studio-machine';
+        config.directory = '/Users/studio/recent-art';
+        config.directoriesByMachine['paws-studio-machine'] = '/Users/studio/recent-art';
+        config.sessionId = 'paws-e2e-session';
+        await chrome.storage.local.set({ [key]: JSON.stringify(config) });
+    });
     await page.reload({ waitUntil: 'domcontentloaded' });
     const reloadedBubble = page.frameLocator('#paws-agent-bubble-frame');
     await reloadedBubble.getByRole('button', { name: '打开 Paws Agent' }).click();
     await waitForExpandedFrame(page);
     await reloadedBubble.getByText('已连接').waitFor({ timeout: 15_000 });
     assert.equal(await reloadedBubble.getByText('把这个浏览器连接到 Paws').count(), 0, 'stored credentials must survive reload');
+    assert.equal(await reloadedBubble.getByLabel('远端机器').inputValue(), 'paws-studio-machine');
+    await expectInputValue(reloadedBubble.getByLabel('远端工作目录'), '/Users/studio/recent-art');
+    await reloadedBubble.getByText('从当前网页开始一条远端会话').waitFor();
+    assert.equal(await reloadedBubble.getByText('E2E fixture reply: remote session is ready.').count(), 0, 'a session from another target must not be restored');
     await page.screenshot({ path: reconnectPath, fullPage: true });
     if (recording || headed) await page.waitForTimeout(2_500);
 
@@ -177,19 +247,44 @@ process.stdout.write(JSON.stringify({
         'single injection and collapsed geometry',
         'QR account link and encrypted credential persistence',
         'online machine selection',
+        'display-name and host fallback across online/offline machines',
+        'realtime machine availability updates',
+        'recent session directory synchronization',
+        'realtime recent-directory synchronization',
+        'home-scoped remote directory browsing',
+        'per-machine directory persistence across switches and reload',
         'directory approval retry',
         'page context transmission',
         'remote reply rendering',
         'full Agent request detail rendering without an approval RPC',
-        'new session reset and reload reconnect',
+        'directory-change session reset and target-safe reload reconnect',
     ],
     sideEffects: 'temporary local protocol server and disposable browser context only',
-    artifacts: { screenshotPath, reconnectPath, ...(recording ? { mp4Path, contactSheetPath } : {}) },
+    artifacts: { screenshotPath, directoryBrowserPath, reconnectPath, ...(recording ? { mp4Path, contactSheetPath } : {}) },
     media,
 }, null, 2) + '\n');
 
 function stage(label) {
     process.stderr.write(`[PAWS-CHROME-BUBBLE-01] ${label}\n`);
+}
+
+async function expectInputValue(locator, expected) {
+    await locator.waitFor();
+    assert.equal(await locator.inputValue(), expected);
+}
+
+async function waitForCondition(label, predicate) {
+    const deadline = Date.now() + 10_000;
+    let lastError = null;
+    while (Date.now() < deadline) {
+        try {
+            if (await predicate()) return;
+        } catch (cause) {
+            lastError = cause;
+        }
+        await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    throw new Error(`${label} timed out${lastError ? `: ${lastError.message}` : ''}`);
 }
 
 async function waitForExpandedFrame(targetPage) {

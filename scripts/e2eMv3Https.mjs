@@ -92,7 +92,12 @@ try {
     let extensionFrame = await waitForExtensionFrame(frameHost);
     await extensionFrame.evaluate(async ({ key, legacyUrl }) => {
         await chrome.storage.local.set({
-            [key]: JSON.stringify({ serverUrl: legacyUrl, machineId: '', directory: '', sessionId: '' }),
+            [key]: JSON.stringify({
+                serverUrl: legacyUrl,
+                machineId: 'legacy-machine',
+                directory: '/Users/legacy/project',
+                sessionId: '',
+            }),
         });
     }, { key: configKey, legacyUrl: legacyServerUrl });
 
@@ -115,6 +120,11 @@ try {
         return result[key];
     }, configKey);
     assert.equal(JSON.parse(savedConfig).serverUrl, serverUrl, 'the migrated production server URL must be persisted');
+    assert.deepEqual(
+        JSON.parse(savedConfig).directoriesByMachine,
+        { 'legacy-machine': '/Users/legacy/project' },
+        'the v0.0.2 global directory must migrate into the per-machine map',
+    );
 
     stage('request account link over HTTPS');
     const generateButton = extensionFrame.getByRole('button', { name: '生成绑定二维码' });
@@ -181,6 +191,7 @@ process.stdout.write(JSON.stringify({
         'real chrome-extension frame injection',
         'trusted HTTPS production origin is the default',
         'legacy production origin is migrated in chrome.storage',
+        'v0.0.2 global directory is migrated to per-machine storage',
         'account-link request is not blocked as mixed content',
         'QR code becomes visible',
     ],
