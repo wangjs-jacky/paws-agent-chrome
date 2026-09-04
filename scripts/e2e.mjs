@@ -122,6 +122,7 @@ try {
     await bubble.getByRole('button', { name: '浏览远端目录' }).click();
     await bubble.getByText('原目录当前不可用，已回到这台机器的主目录。').waitFor();
     await bubble.getByRole('button', { name: '打开文件夹 Projects' }).click();
+    await bubble.getByRole('button', { name: '打开文件夹 paws-chrome' }).waitFor();
     await page.screenshot({ path: directoryBrowserPath, fullPage: true });
     if (recording || headed) await page.waitForTimeout(900);
     await bubble.getByRole('button', { name: '打开文件夹 paws-chrome' }).click();
