@@ -69,6 +69,14 @@ async function packageRelease({ packageDir, outputDir, tag }) {
     if (!containsExactly(permissions, ['storage'])) {
         throw new Error(`Production extension has unexpected permissions: ${permissions.join(', ') || 'none'}`);
     }
+    if (manifest.optional_host_permissions !== undefined
+        && (!Array.isArray(manifest.optional_host_permissions) || manifest.optional_host_permissions.length > 0)) {
+        throw new Error('Production extension must not declare optional host permissions');
+    }
+    if (manifest.optional_permissions !== undefined
+        && (!Array.isArray(manifest.optional_permissions) || manifest.optional_permissions.length > 0)) {
+        throw new Error('Production extension must not declare optional permissions');
+    }
 
     await mkdir(outputDir, { recursive: true });
     const artifactBase = `paws-agent-chrome-${tag}`;

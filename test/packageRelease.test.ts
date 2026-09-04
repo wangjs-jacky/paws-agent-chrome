@@ -105,6 +105,22 @@ describe('release packager', () => {
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain('Production extension has unexpected permissions');
     });
+
+    test('rejects optional production host permissions', async () => {
+        const fixture = await createFixture({ optionalHostPermissions: ['<all_urls>'] });
+        const result = runPackager(fixture.projectDir, fixture.outputDir, 'v0.0.3');
+
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('Production extension must not declare optional host permissions');
+    });
+
+    test('rejects optional privileged extension permissions', async () => {
+        const fixture = await createFixture({ optionalPermissions: ['cookies'] });
+        const result = runPackager(fixture.projectDir, fixture.outputDir, 'v0.0.3');
+
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('Production extension must not declare optional permissions');
+    });
 });
 
 function runPackager(projectDir: string, outputDir: string, tag: string) {
@@ -120,6 +136,8 @@ async function createFixture(options: {
     extraHostPermission?: string;
     localhost?: boolean;
     manifestVersion?: string;
+    optionalHostPermissions?: string[];
+    optionalPermissions?: string[];
     permissions?: string[];
 } = {}) {
     const projectDir = await mkdtemp(join(tmpdir(), 'paws-agent-chrome-release-'));
@@ -136,6 +154,8 @@ async function createFixture(options: {
         name: 'Paws Agent',
         version: options.manifestVersion ?? '0.0.3',
         permissions: options.permissions ?? ['storage'],
+        optional_permissions: options.optionalPermissions,
+        optional_host_permissions: options.optionalHostPermissions,
         host_permissions: [
             'https://47.115.228.20:8443/*',
             ...(options.localhost ? ['http://localhost/*'] : []),
