@@ -21,6 +21,26 @@ pnpm verify
 
 The unpacked extension is written to `dist/`.
 
+## Install a release
+
+1. Download `paws-agent-chrome-vX.Y.Z.zip` and its matching `.sha256` file
+   from [GitHub Releases](https://github.com/wangjs-jacky/paws-agent-chrome/releases).
+2. Put both files in the same directory and verify the download:
+
+   ```bash
+   shasum -a 256 -c paws-agent-chrome-vX.Y.Z.sha256
+   ```
+
+3. Extract the ZIP into a permanent directory. The extension files are at the
+   ZIP root; Chrome cannot load the ZIP directly.
+4. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**,
+   and select that extracted directory.
+
+For an upgrade, replace the files inside the existing extracted directory so
+its path stays unchanged, then click **Reload** on the extension card in
+`chrome://extensions`. Keeping the same path preserves the unpacked extension
+identity and its linked-account storage.
+
 ## Load in Chromium or Ego Lite
 
 1. Open `chrome://extensions`.
@@ -60,6 +80,24 @@ pnpm test:e2e:ego:record
 `PAWS-EGO-LITE-HOST-01` launches Ego Lite with a disposable profile and the unpacked extension. It verifies a real `chrome-extension://` iframe, real `chrome.storage`, the encrypted SDK flow, and reconnect after a full browser restart. It never modifies the regular Ego Lite profile or connects to production.
 
 Historical acceptance evidence is retained in [`docs/evidence`](docs/evidence).
+
+## Release automation
+
+Maintainers bump `package.json` through a pull request. After it is merged, a
+tag matching that version (for example `v0.0.3`) triggers the Release workflow.
+The workflow reruns unit, browser, real-MV3 HTTPS, and live-production checks,
+rebuilds the production extension, validates the version and exact permission
+allowlist, creates the root-level ZIP and SHA256 file, then creates or safely
+updates the matching GitHub Release. Build and test steps have read-only
+repository access; write access exists only in the final publish job.
+
+The same packaging contract can be checked locally:
+
+```bash
+pnpm run package:release -- --tag v0.0.3
+cd release-artifacts
+shasum -a 256 -c paws-agent-chrome-v0.0.3.sha256
+```
 
 ## Security boundary
 
