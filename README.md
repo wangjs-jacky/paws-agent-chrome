@@ -36,8 +36,10 @@ The unpacked extension is written to `dist/`.
 4. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**,
    and select that extracted directory.
 
-For an upgrade, extract the newer release to a new permanent directory, select
-it with **Load unpacked**, and remove the older copy after verification.
+For an upgrade, replace the files inside the existing extracted directory so
+its path stays unchanged, then click **Reload** on the extension card in
+`chrome://extensions`. Keeping the same path preserves the unpacked extension
+identity and its linked-account storage.
 
 ## Load in Chromium or Ego Lite
 
@@ -83,9 +85,11 @@ Historical acceptance evidence is retained in [`docs/evidence`](docs/evidence).
 
 Maintainers bump `package.json` through a pull request. After it is merged, a
 tag matching that version (for example `v0.0.3`) triggers the Release workflow.
-The workflow reruns verification, rebuilds the production extension, validates
-the version and permission boundary, creates the root-level ZIP and SHA256
-file, then creates or safely updates the matching GitHub Release.
+The workflow reruns unit, browser, real-MV3 HTTPS, and live-production checks,
+rebuilds the production extension, validates the version and exact permission
+allowlist, creates the root-level ZIP and SHA256 file, then creates or safely
+updates the matching GitHub Release. Build and test steps have read-only
+repository access; write access exists only in the final publish job.
 
 The same packaging contract can be checked locally:
 

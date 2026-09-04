@@ -62,6 +62,13 @@ async function packageRelease({ packageDir, outputDir, tag }) {
     if (hostPermissions.some(permission => permission.startsWith('http://47.115.228.20:'))) {
         throw new Error('Production extension must not allow the legacy plaintext service origin');
     }
+    if (!containsExactly(hostPermissions, ['https://47.115.228.20:8443/*'])) {
+        throw new Error(`Production extension has unexpected host permissions: ${hostPermissions.join(', ') || 'none'}`);
+    }
+    const permissions = Array.isArray(manifest.permissions) ? manifest.permissions : [];
+    if (!containsExactly(permissions, ['storage'])) {
+        throw new Error(`Production extension has unexpected permissions: ${permissions.join(', ') || 'none'}`);
+    }
 
     await mkdir(outputDir, { recursive: true });
     const artifactBase = `paws-agent-chrome-${tag}`;
@@ -100,4 +107,8 @@ function parseArguments(args) {
         if (flag === '--output-dir') options.outputDir = value;
     }
     return options;
+}
+
+function containsExactly(actual, expected) {
+    return actual.length === expected.length && expected.every(value => actual.includes(value));
 }

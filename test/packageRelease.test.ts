@@ -89,6 +89,22 @@ describe('release packager', () => {
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain('Production extension must not request localhost permissions');
     });
+
+    test('rejects unexpected production host permissions', async () => {
+        const fixture = await createFixture({ extraHostPermission: 'https://*/*' });
+        const result = runPackager(fixture.projectDir, fixture.outputDir, 'v0.0.3');
+
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('Production extension has unexpected host permissions');
+    });
+
+    test('rejects unexpected privileged extension permissions', async () => {
+        const fixture = await createFixture({ permissions: ['storage', 'tabs'] });
+        const result = runPackager(fixture.projectDir, fixture.outputDir, 'v0.0.3');
+
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('Production extension has unexpected permissions');
+    });
 });
 
 function runPackager(projectDir: string, outputDir: string, tag: string) {
@@ -100,7 +116,12 @@ function runPackager(projectDir: string, outputDir: string, tag: string) {
     ], { encoding: 'utf8' });
 }
 
-async function createFixture(options: { localhost?: boolean; manifestVersion?: string } = {}) {
+async function createFixture(options: {
+    extraHostPermission?: string;
+    localhost?: boolean;
+    manifestVersion?: string;
+    permissions?: string[];
+} = {}) {
     const projectDir = await mkdtemp(join(tmpdir(), 'paws-agent-chrome-release-'));
     temporaryDirectories.push(projectDir);
     const distDir = join(projectDir, 'dist');
@@ -114,9 +135,12 @@ async function createFixture(options: { localhost?: boolean; manifestVersion?: s
         manifest_version: 3,
         name: 'Paws Agent',
         version: options.manifestVersion ?? '0.0.3',
-        host_permissions: options.localhost
-            ? ['https://47.115.228.20:8443/*', 'http://localhost/*']
-            : ['https://47.115.228.20:8443/*'],
+        permissions: options.permissions ?? ['storage'],
+        host_permissions: [
+            'https://47.115.228.20:8443/*',
+            ...(options.localhost ? ['http://localhost/*'] : []),
+            ...(options.extraHostPermission ? [options.extraHostPermission] : []),
+        ],
     };
     for (const file of extensionFiles) {
         const contents = file === 'manifest.json' ? JSON.stringify(manifest) : `fixture:${file}\n`;

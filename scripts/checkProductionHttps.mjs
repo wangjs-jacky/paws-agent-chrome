@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 const serverUrl = 'https://47.115.228.20:8443';
 const sentinelPublicKey = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+const packageVersion = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 const healthResponse = await fetch(`${serverUrl}/health`, withTimeout());
 assert.equal(healthResponse.ok, true, `production health check failed (${healthResponse.status})`);
@@ -13,7 +15,7 @@ const linkResponse = await fetch(`${serverUrl}/v1/auth/account/request`, {
     method: 'POST',
     headers: {
         'Content-Type': 'application/json',
-        'X-Happy-Client': 'paws-agent-chrome-production-check/0.0.2',
+        'X-Happy-Client': `paws-agent-chrome-production-check/${packageVersion}`,
     },
     body: JSON.stringify({ publicKey: sentinelPublicKey }),
 });
