@@ -1,4 +1,11 @@
-import { PawsAgentClient, type AgentRequest, type Machine, type Message } from '@wangjs-jacky/paws-agent';
+import {
+    PawsAgentClient,
+    type AgentRequest,
+    type BrowseDirectoryResult,
+    type Machine,
+    type Message,
+    type Session,
+} from '@wangjs-jacky/paws-agent';
 import {
     BrowserCredentialProvider,
     startBrowserAccountLink,
@@ -7,6 +14,13 @@ import QRCode from 'qrcode';
 import { createChromeStorage } from './chromeStorage';
 import { composePrompt, type PageContext } from './pageContext';
 import { DEFAULT_SERVER_URL, normalizeServerUrl } from './serverUrl';
+import {
+    machineDisplayName,
+    machineHomeDirectory,
+    recentDirectoriesForMachine,
+    resolvePreferredDirectory,
+    sortMachinesForPicker,
+} from './targetPreferences';
 
 type Phase = 'booting' | 'signedOut' | 'linking' | 'connecting' | 'ready';
 
@@ -14,8 +28,11 @@ type LocalConfig = {
     serverUrl: string;
     machineId: string;
     directory: string;
+    directoriesByMachine: Record<string, string>;
     sessionId: string;
 };
+
+type SuccessfulDirectoryListing = Extract<BrowseDirectoryResult, { success: true }>;
 
 const CONFIG_KEY = 'paws-agent.chrome.config';
 const storage = createChromeStorage();
@@ -30,11 +47,13 @@ let config: LocalConfig = {
     serverUrl: DEFAULT_SERVER_URL,
     machineId: '',
     directory: '',
+    directoriesByMachine: {},
     sessionId: '',
 };
 let client: PawsAgentClient | null = null;
 let unsubscribe: (() => void) | null = null;
 let machines: Machine[] = [];
+let sessions: Session[] = [];
 let messages: Message[] = [];
 let requests: AgentRequest[] = [];
 let pageContext: PageContext | null = null;
@@ -47,6 +66,11 @@ let pendingDirectoryApproval = false;
 let statusText = '准备连接';
 let errorText = '';
 let linkController: AbortController | null = null;
+let directoryBrowserOpen = false;
+let directoryBrowserLoading = false;
+let directoryBrowserListing: SuccessfulDirectoryListing | null = null;
+let directoryBrowserError = '';
+let directoryBrowserHint = '';
 
 window.addEventListener('message', event => {
     if (event.source !== window.parent) return;
@@ -74,13 +98,22 @@ async function initialize(): Promise<void> {
         try {
             const parsed = JSON.parse(saved) as Partial<LocalConfig>;
             const savedServerUrl = typeof parsed.serverUrl === 'string' ? parsed.serverUrl : '';
+            const directoriesByMachine = stringRecord(parsed.directoriesByMachine);
+            const savedMachineId = typeof parsed.machineId === 'string' ? parsed.machineId : '';
+            const legacyDirectory = typeof parsed.directory === 'string' ? parsed.directory : '';
+            let migratedLegacyDirectory = false;
+            if (savedMachineId && legacyDirectory.trim() && !directoriesByMachine[savedMachineId]) {
+                directoriesByMachine[savedMachineId] = legacyDirectory.trim();
+                migratedLegacyDirectory = true;
+            }
             config = {
                 serverUrl: normalizeServerUrl(savedServerUrl),
-                machineId: typeof parsed.machineId === 'string' ? parsed.machineId : '',
-                directory: typeof parsed.directory === 'string' ? parsed.directory : '',
+                machineId: savedMachineId,
+                directory: legacyDirectory,
+                directoriesByMachine,
                 sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : '',
             };
-            if (config.serverUrl !== savedServerUrl) await saveConfig();
+            if (config.serverUrl !== savedServerUrl || migratedLegacyDirectory) await saveConfig();
         } catch {
             await storage.remove(CONFIG_KEY);
         }
@@ -185,7 +218,12 @@ function renderLinking(): HTMLElement {
 
 function renderConversation(): HTMLElement {
     const container = element('div', 'conversation');
-    container.append(renderTargetPicker(), renderMessages());
+    container.append(renderTargetPicker());
+    if (directoryBrowserOpen) {
+        container.append(renderDirectoryBrowser());
+        return container;
+    }
+    container.append(renderMessages());
     if (requests.length > 0) container.append(renderRequests());
     if (pendingDirectoryApproval) {
         const approval = element('div', 'notice notice-warning');
@@ -201,20 +239,97 @@ function renderTargetPicker(): HTMLElement {
     const row = element('div', 'target-row');
     const machine = document.createElement('select');
     machine.setAttribute('aria-label', '远端机器');
-    if (machines.length === 0) machine.append(new Option('没有在线机器', ''));
-    for (const item of machines) machine.append(new Option(machineLabel(item), item.id));
+    if (machines.length === 0) machine.append(new Option('没有已绑定机器', ''));
+    for (const item of machines) {
+        const option = new Option(machinePickerLabel(item), item.id);
+        option.disabled = !item.active;
+        machine.append(option);
+    }
     machine.value = config.machineId;
-    machine.addEventListener('change', () => { config.machineId = machine.value; void saveConfig(); });
+    machine.addEventListener('change', () => { void selectMachine(machine.value); });
     const reset = secondaryButton('新会话', () => void resetSession());
     row.append(machine, reset);
 
+    const directoryRow = element('div', 'directory-row');
     const directory = document.createElement('input');
     directory.type = 'text';
     directory.setAttribute('aria-label', '远端工作目录');
     directory.placeholder = '/Users/you/project';
     directory.value = config.directory;
-    directory.addEventListener('change', () => { config.directory = directory.value.trim(); void saveConfig(); });
-    section.append(row, directory);
+    directory.addEventListener('change', () => { void setCurrentDirectory(directory.value); });
+    const browse = secondaryButton('浏览', () => void openDirectoryBrowser());
+    browse.setAttribute('aria-label', '浏览远端目录');
+    browse.disabled = !selectedMachine()?.active;
+    directoryRow.append(directory, browse);
+
+    const recent = currentRecentDirectories();
+    const recentPicker = document.createElement('select');
+    recentPicker.className = 'recent-directory';
+    recentPicker.setAttribute('aria-label', '最近使用的远端目录');
+    recentPicker.append(new Option(recent.length > 0 ? '选择最近使用的目录…' : '暂无历史目录', ''));
+    for (const path of recent) recentPicker.append(new Option(path, path));
+    recentPicker.disabled = recent.length === 0;
+    recentPicker.addEventListener('change', () => {
+        if (recentPicker.value) void setCurrentDirectory(recentPicker.value);
+    });
+
+    section.append(row, directoryRow, recentPicker);
+    return section;
+}
+
+function renderDirectoryBrowser(): HTMLElement {
+    const section = element('section', 'directory-browser');
+    const header = element('div', 'directory-browser-header');
+    const labels = element('div');
+    labels.append(element('strong', '', '选择远端目录'));
+    if (directoryBrowserListing) labels.append(element('span', 'directory-path', directoryBrowserListing.path));
+    const close = secondaryButton('取消', closeDirectoryBrowser);
+    header.append(labels, close);
+    section.append(header);
+
+    if (directoryBrowserHint) section.append(element('div', 'directory-hint', directoryBrowserHint));
+    if (directoryBrowserError) section.append(element('div', 'notice notice-error directory-notice', directoryBrowserError));
+    if (directoryBrowserLoading) {
+        const loading = element('div', 'directory-loading');
+        loading.append(element('span', 'spinner'), element('span', '', '正在读取远端目录…'));
+        section.append(loading);
+        return section;
+    }
+
+    const listing = directoryBrowserListing;
+    if (!listing) return section;
+
+    const actions = element('div', 'directory-actions');
+    const up = secondaryButton('上一级', () => {
+        if (listing.parent) void loadRemoteDirectory(listing.parent);
+    });
+    up.disabled = listing.parent === null;
+    const home = secondaryButton('主目录', () => void loadRemoteDirectory(listing.home));
+    actions.append(up, home);
+    section.append(actions);
+
+    const list = element('div', 'directory-list');
+    list.setAttribute('role', 'list');
+    if (listing.directories.length === 0) {
+        list.append(element('p', 'directory-empty', '这个目录下没有可浏览的子文件夹。'));
+    }
+    for (const item of listing.directories) {
+        const button = element('button', 'directory-entry') as HTMLButtonElement;
+        button.type = 'button';
+        button.setAttribute('aria-label', `打开文件夹 ${item.name}`);
+        button.append(
+            element('span', 'directory-icon', item.isProjectRoot ? '◆' : '▸'),
+            element('span', 'directory-name', item.name),
+            item.isProjectRoot ? element('span', 'project-badge', 'Git') : element('span'),
+        );
+        button.addEventListener('click', () => void loadRemoteDirectory(item.path));
+        list.append(button);
+    }
+    section.append(list);
+
+    const use = primaryButton('使用当前目录', () => void chooseBrowsedDirectory());
+    use.classList.add('directory-use');
+    section.append(use);
     return section;
 }
 
@@ -359,8 +474,17 @@ async function connectClient(): Promise<void> {
             }
         });
         await client.connect();
-        machines = await client.machines.list({ active: true });
-        if (!machines.some(item => item.id === config.machineId)) config.machineId = machines[0]?.id ?? '';
+        machines = sortMachinesForPicker(await client.machines.list());
+        sessions = await client.sessions.list();
+        const previousMachineId = config.machineId;
+        const configuredMachine = machines.find(item => item.id === config.machineId && item.active);
+        config.machineId = configuredMachine?.id ?? machines.find(item => item.active)?.id ?? machines[0]?.id ?? '';
+        if (previousMachineId && previousMachineId !== config.machineId) {
+            config.sessionId = '';
+            messages = [];
+            requests = [];
+        }
+        applyPreferredDirectory();
         if (config.sessionId) messages = await client.messages.history(config.sessionId, { limit: 50 });
         await saveConfig();
         phase = 'ready';
@@ -379,6 +503,11 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
     if (!client || busy || !draft.trim() || !config.machineId || !config.directory.trim()) {
         if (!config.machineId) errorText = '没有可用的在线机器。';
         else if (!config.directory.trim()) errorText = '请先填写远端工作目录。';
+        render();
+        return;
+    }
+    if (!selectedMachine()?.active) {
+        errorText = '所选机器当前离线，请切换到在线机器。';
         render();
         return;
     }
@@ -429,6 +558,115 @@ async function resetSession(): Promise<void> {
     render();
 }
 
+async function selectMachine(machineId: string): Promise<void> {
+    if (machineId === config.machineId) return;
+    rememberCurrentDirectory();
+    config.machineId = machineId;
+    config.sessionId = '';
+    messages = [];
+    requests = [];
+    pendingDirectoryApproval = false;
+    closeDirectoryBrowser();
+    applyPreferredDirectory();
+    await saveConfig();
+    render();
+}
+
+async function setCurrentDirectory(value: string): Promise<void> {
+    config.directory = value.trim();
+    rememberCurrentDirectory();
+    pendingDirectoryApproval = false;
+    await saveConfig();
+    render();
+}
+
+async function openDirectoryBrowser(): Promise<void> {
+    const machine = selectedMachine();
+    if (!client || !machine?.active) {
+        errorText = '请选择一台在线机器后再浏览目录。';
+        render();
+        return;
+    }
+    directoryBrowserOpen = true;
+    directoryBrowserHint = '';
+    directoryBrowserError = '';
+    directoryBrowserListing = null;
+    render();
+    const requestedPath = config.directory.trim();
+    const loaded = await loadRemoteDirectory(requestedPath);
+    if (!loaded && requestedPath) {
+        directoryBrowserHint = '原目录当前不可用，已回到这台机器的主目录。';
+        await loadRemoteDirectory('');
+    }
+}
+
+async function loadRemoteDirectory(path: string): Promise<boolean> {
+    if (!client || !config.machineId) return false;
+    directoryBrowserLoading = true;
+    directoryBrowserError = '';
+    render();
+    try {
+        const result = await client.machines.browseDirectory({ machineId: config.machineId, path });
+        if (!result.success) {
+            directoryBrowserError = result.error;
+            directoryBrowserLoading = false;
+            render();
+            return false;
+        }
+        directoryBrowserListing = result;
+        directoryBrowserLoading = false;
+        render();
+        return true;
+    } catch (cause) {
+        directoryBrowserError = errorMessage(cause);
+        directoryBrowserLoading = false;
+        render();
+        return false;
+    }
+}
+
+async function chooseBrowsedDirectory(): Promise<void> {
+    const path = directoryBrowserListing?.path;
+    if (!path) return;
+    closeDirectoryBrowser();
+    await setCurrentDirectory(path);
+}
+
+function closeDirectoryBrowser(): void {
+    directoryBrowserOpen = false;
+    directoryBrowserLoading = false;
+    directoryBrowserListing = null;
+    directoryBrowserError = '';
+    directoryBrowserHint = '';
+    render();
+}
+
+function applyPreferredDirectory(): void {
+    const machine = selectedMachine();
+    config.directory = resolvePreferredDirectory({
+        machineId: config.machineId,
+        directoriesByMachine: config.directoriesByMachine,
+        recentDirectories: currentRecentDirectories(),
+        homeDirectory: machineHomeDirectory(machine),
+    });
+    rememberCurrentDirectory();
+}
+
+function rememberCurrentDirectory(): void {
+    if (!config.machineId) return;
+    const directory = config.directory.trim();
+    if (directory) config.directoriesByMachine[config.machineId] = directory;
+    else delete config.directoriesByMachine[config.machineId];
+}
+
+function selectedMachine(): Machine | undefined {
+    return machines.find(item => item.id === config.machineId);
+}
+
+function currentRecentDirectories(): string[] {
+    return recentDirectoriesForMachine(sessions, config.machineId);
+}
+
 function setExpanded(value: boolean): void {
     expanded = value;
     syncHostState();
@@ -450,12 +688,27 @@ function isPageContext(value: unknown): value is PageContext {
     return typeof candidate.title === 'string' && typeof candidate.url === 'string' && typeof candidate.selection === 'string';
 }
 
-function machineLabel(machine: Machine): string {
-    const metadata = machine.metadata as Record<string, unknown> | null;
-    for (const key of ['displayName', 'name', 'hostname']) {
-        if (typeof metadata?.[key] === 'string' && metadata[key]) return String(metadata[key]);
-    }
-    return `机器 ${machine.id.slice(0, 8)}`;
+function machinePickerLabel(machine: Machine): string {
+    if (machine.active) return `${machineDisplayName(machine)} · 在线`;
+    return `${machineDisplayName(machine)} · 离线 · ${formatLastActive(machine.activeAt)}`;
+}
+
+function formatLastActive(timestamp: number): string {
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return '未记录活跃时间';
+    return `最后活跃 ${new Intl.DateTimeFormat('zh-CN', {
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    }).format(new Date(timestamp))}`;
+}
+
+function stringRecord(value: unknown): Record<string, string> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(
+        Object.entries(value)
+            .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    );
 }
 
 function messageText(content: unknown): string {

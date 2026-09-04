@@ -13,6 +13,7 @@ const artifactDir = resolve('test-results/paws-agent-chrome-e2e');
 const recording = process.env.PAWS_EXTENSION_E2E_RECORD === '1';
 const headed = process.env.PAWS_EXTENSION_E2E_HEADED === '1';
 const screenshotPath = resolve(artifactDir, recording ? 'connected-recording.png' : 'connected.png');
+const directoryBrowserPath = resolve(artifactDir, recording ? 'directory-browser-recording.png' : 'directory-browser.png');
 const reconnectPath = resolve(artifactDir, recording ? 'reconnected-recording.png' : 'reconnected.png');
 const rawVideoDir = resolve(artifactDir, 'raw-video');
 const mp4Path = resolve(artifactDir, 'paws-chrome-bubble-e2e.mp4');
@@ -85,12 +86,40 @@ try {
 
     stage('connect SDK and select remote target');
     await bubble.getByText('已连接').waitFor({ timeout: 15_000 });
+    const machineOptions = await bubble.getByLabel('远端机器').locator('option').allTextContents();
+    assert.deepEqual(machineOptions, [
+        'E2E Mac mini · 在线',
+        'studio-mac.local · 在线',
+        'retired-mac.local · 离线 · 未记录活跃时间',
+    ]);
     await bubble.getByLabel('远端机器').selectOption('paws-e2e-machine');
-    await bubble.getByLabel('远端工作目录').fill('/tmp/paws-e2e-project');
+    await expectInputValue(bubble.getByLabel('远端工作目录'), '/Users/e2e/recent-project');
+    const recentOptions = await bubble.getByLabel('最近使用的远端目录').locator('option').allTextContents();
+    assert.deepEqual(recentOptions, [
+        '选择最近使用的目录…',
+        '/Users/e2e/recent-project',
+        '/Users/e2e/older-project',
+    ]);
+
+    stage('browse remote directories through the SDK and keep a per-machine path');
+    await bubble.getByRole('button', { name: '浏览远端目录' }).click();
+    await bubble.getByText('原目录当前不可用，已回到这台机器的主目录。').waitFor();
+    await bubble.getByRole('button', { name: '打开文件夹 Projects' }).click();
+    await page.screenshot({ path: directoryBrowserPath, fullPage: true });
+    if (recording || headed) await page.waitForTimeout(900);
+    await bubble.getByRole('button', { name: '打开文件夹 paws-chrome' }).click();
+    await bubble.getByRole('button', { name: '使用当前目录' }).click();
+    await expectInputValue(bubble.getByLabel('远端工作目录'), '/Users/e2e/Projects/paws-chrome');
+
+    await bubble.getByLabel('远端机器').selectOption('paws-studio-machine');
+    await expectInputValue(bubble.getByLabel('远端工作目录'), '/Users/studio/recent-art');
+    await bubble.getByLabel('远端机器').selectOption('paws-e2e-machine');
+    await expectInputValue(bubble.getByLabel('远端工作目录'), '/Users/e2e/Projects/paws-chrome');
+
     await bubble.getByPlaceholder('告诉远端 Agent 你想做什么…').fill(marker);
     if (recording || headed) await page.waitForTimeout(900);
     await bubble.getByRole('button', { name: '发送', exact: true }).click();
-    await bubble.getByText('远端目录不存在：/tmp/paws-e2e-project').waitFor();
+    await bubble.getByText('远端目录不存在：/Users/e2e/Projects/paws-chrome').waitFor();
     if (recording || headed) await page.waitForTimeout(900);
     await bubble.getByRole('button', { name: '允许创建并继续' }).click();
 
@@ -112,6 +141,12 @@ try {
     assert.equal(fixture.state.authRequests >= 2, true, 'account link must poll for authorization');
     assert.equal(fixture.state.spawnRequests, 2, 'directory approval must retry the spawn once');
     assert.equal(fixture.state.approvedSpawnRequests, 1, 'the approved spawn must occur exactly once');
+    assert.deepEqual(fixture.state.browseRequests, [
+        { machineId: 'paws-e2e-machine', path: '/Users/e2e/recent-project' },
+        { machineId: 'paws-e2e-machine', path: '' },
+        { machineId: 'paws-e2e-machine', path: '/Users/e2e/Projects' },
+        { machineId: 'paws-e2e-machine', path: '/Users/e2e/Projects/paws-chrome' },
+    ]);
     assert.equal(fixture.state.plainPrompts.length, 1, 'the remote fixture must receive one prompt');
     const prompt = fixture.state.plainPrompts[0];
     assert.match(prompt, /Investigate checkout failure/);
@@ -128,6 +163,7 @@ try {
     await waitForExpandedFrame(page);
     await reloadedBubble.getByText('已连接').waitFor({ timeout: 15_000 });
     assert.equal(await reloadedBubble.getByText('把这个浏览器连接到 Paws').count(), 0, 'stored credentials must survive reload');
+    await expectInputValue(reloadedBubble.getByLabel('远端工作目录'), '/Users/e2e/Projects/paws-chrome');
     await page.screenshot({ path: reconnectPath, fullPage: true });
     if (recording || headed) await page.waitForTimeout(2_500);
 
@@ -177,6 +213,10 @@ process.stdout.write(JSON.stringify({
         'single injection and collapsed geometry',
         'QR account link and encrypted credential persistence',
         'online machine selection',
+        'display-name and host fallback across online/offline machines',
+        'recent session directory synchronization',
+        'home-scoped remote directory browsing',
+        'per-machine directory persistence across switches and reload',
         'directory approval retry',
         'page context transmission',
         'remote reply rendering',
@@ -184,12 +224,17 @@ process.stdout.write(JSON.stringify({
         'new session reset and reload reconnect',
     ],
     sideEffects: 'temporary local protocol server and disposable browser context only',
-    artifacts: { screenshotPath, reconnectPath, ...(recording ? { mp4Path, contactSheetPath } : {}) },
+    artifacts: { screenshotPath, directoryBrowserPath, reconnectPath, ...(recording ? { mp4Path, contactSheetPath } : {}) },
     media,
 }, null, 2) + '\n');
 
 function stage(label) {
     process.stderr.write(`[PAWS-CHROME-BUBBLE-01] ${label}\n`);
+}
+
+async function expectInputValue(locator, expected) {
+    await locator.waitFor();
+    assert.equal(await locator.inputValue(), expected);
 }
 
 async function waitForExpandedFrame(targetPage) {

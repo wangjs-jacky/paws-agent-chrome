@@ -27,7 +27,11 @@ The unpacked extension is written to `dist/`.
 2. Enable Developer mode.
 3. Choose **Load unpacked** and select this repository's `dist/` directory.
 4. Open a normal HTTP or HTTPS page. The paw button appears at the bottom-right.
-5. Open the bubble, link the browser by QR code, choose an online machine and directory, then send a message.
+5. Open the bubble, link the browser by QR code, choose an online machine, then type, reuse, or remotely browse for a working directory before sending a message.
+
+The target picker lists all bound machines with online state, uses
+`displayName` or `host` as the device name, syncs recent directories from Paws
+session history, and remembers the last directory separately for each machine.
 
 ## Test
 
@@ -44,7 +48,7 @@ pnpm test:e2e:ego
 pnpm test:e2e:ego:record
 ```
 
-`PAWS-CHROME-BUBBLE-01` exercises the built extension UI against a temporary local protocol server. It covers QR linking, encrypted credentials, machine selection, directory approval, page context, session creation, remote replies, reset, reconnect after reload, and the trusted-client-only approval boundary.
+`PAWS-CHROME-BUBBLE-01` exercises the built extension UI against a temporary local protocol server. It covers QR linking, encrypted credentials, display-name/host fallback, online and offline machines, recent session directories, home-scoped remote directory browsing, per-machine persistence, directory approval, page context, session creation, remote replies, reset, reconnect after reload, and the trusted-client-only approval boundary.
 
 `PAWS-CHROME-HTTPS-01` loads the real Manifest V3 extension inside an HTTPS host page. It protects the trusted `https://47.115.228.20:8443` default, host permission, account-link request, and QR rendering against mixed-content regressions.
 

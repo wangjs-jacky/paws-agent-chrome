@@ -19,10 +19,11 @@ const screenshotPaths = {
     collapsed: resolve(artifactDir, '02-collapsed.png'),
     accountLink: resolve(artifactDir, '03-account-link.png'),
     linked: resolve(artifactDir, '04-linked.png'),
-    approval: resolve(artifactDir, '05-directory-approval.png'),
-    replied: resolve(artifactDir, '06-remote-reply.png'),
-    safeRequest: resolve(artifactDir, '07-safe-agent-request.png'),
-    restarted: resolve(artifactDir, '08-restarted-connected.png'),
+    directoryBrowser: resolve(artifactDir, '05-directory-browser.png'),
+    approval: resolve(artifactDir, '06-directory-approval.png'),
+    replied: resolve(artifactDir, '07-remote-reply.png'),
+    safeRequest: resolve(artifactDir, '08-safe-agent-request.png'),
+    restarted: resolve(artifactDir, '09-restarted-connected.png'),
 };
 const mp4Path = resolve(artifactDir, 'paws-ego-lite-host-e2e.mp4');
 const contactSheetPath = resolve(artifactDir, 'paws-ego-lite-host-e2e-contact-sheet.png');
@@ -65,6 +66,7 @@ try {
     assert.equal(fixture.state.authRequests >= 2, true, 'account link must poll for authorization');
     assert.equal(fixture.state.spawnRequests, 2, 'directory approval must retry the spawn once');
     assert.equal(fixture.state.approvedSpawnRequests, 1, 'the approved spawn must occur exactly once');
+    assert.equal(fixture.state.browseRequests.length, 4, 'the picker must browse from the saved path back through home into the selected project');
     assert.equal(fixture.state.plainPrompts.length, 1, 'the remote fixture must receive one prompt');
     assert.equal(fixture.state.requestResolutionCalls, 0, 'the host-embedded frame must not resolve Agent requests');
     const prompt = fixture.state.plainPrompts[0];
@@ -99,6 +101,8 @@ process.stdout.write(JSON.stringify({
         'single injection and collapsed geometry',
         'real chrome.storage credential persistence',
         'QR account link and online machine selection',
+        'device display-name/host fallback and offline status',
+        'recent, browsed, and per-machine directory selection',
         'directory approval retry',
         'encrypted page context and remote reply',
         'full Agent request detail rendering without an approval RPC',
@@ -140,13 +144,30 @@ async function openFirstPage(targetBrowser) {
     await page.waitForTimeout(900);
 
     await bubble.getByText('已连接').waitFor({ timeout: 15_000 });
+    assert.deepEqual(await bubble.getByLabel('远端机器').locator('option').allTextContents(), [
+        'E2E Mac mini · 在线',
+        'studio-mac.local · 在线',
+        'retired-mac.local · 离线 · 未记录活跃时间',
+    ]);
     await bubble.getByLabel('远端机器').selectOption('paws-e2e-machine');
-    await bubble.getByLabel('远端工作目录').fill('/tmp/paws-e2e-project');
+    assert.equal(await bubble.getByLabel('远端工作目录').inputValue(), '/Users/e2e/recent-project');
+    await bubble.getByRole('button', { name: '浏览远端目录' }).click();
+    await bubble.getByText('原目录当前不可用，已回到这台机器的主目录。').waitFor();
+    await bubble.getByRole('button', { name: '打开文件夹 Projects' }).click();
+    await page.screenshot({ path: screenshotPaths.directoryBrowser });
+    await page.waitForTimeout(900);
+    await bubble.getByRole('button', { name: '打开文件夹 paws-chrome' }).click();
+    await bubble.getByRole('button', { name: '使用当前目录' }).click();
+    assert.equal(await bubble.getByLabel('远端工作目录').inputValue(), '/Users/e2e/Projects/paws-chrome');
+    await bubble.getByLabel('远端机器').selectOption('paws-studio-machine');
+    assert.equal(await bubble.getByLabel('远端工作目录').inputValue(), '/Users/studio/recent-art');
+    await bubble.getByLabel('远端机器').selectOption('paws-e2e-machine');
+    assert.equal(await bubble.getByLabel('远端工作目录').inputValue(), '/Users/e2e/Projects/paws-chrome');
     await bubble.getByPlaceholder('告诉远端 Agent 你想做什么…').fill(marker);
     await page.screenshot({ path: screenshotPaths.linked });
     await page.waitForTimeout(900);
     await bubble.getByRole('button', { name: '发送', exact: true }).click();
-    await bubble.getByText('远端目录不存在：/tmp/paws-e2e-project').waitFor();
+    await bubble.getByText('远端目录不存在：/Users/e2e/Projects/paws-chrome').waitFor();
     await page.screenshot({ path: screenshotPaths.approval });
     await page.waitForTimeout(900);
     await bubble.getByRole('button', { name: '允许创建并继续' }).click();
@@ -189,7 +210,7 @@ async function verifyRestart(targetBrowser, expectedExtensionId) {
     await bubble.getByText('已连接').waitFor({ timeout: 15_000 });
     assert.equal(await bubble.getByText('把这个浏览器连接到 Paws').count(), 0, 'stored credentials must survive a full Ego Lite restart');
     await bubble.getByLabel('远端机器').selectOption('paws-e2e-machine');
-    assert.equal(await bubble.getByLabel('远端工作目录').inputValue(), '/tmp/paws-e2e-project');
+    assert.equal(await bubble.getByLabel('远端工作目录').inputValue(), '/Users/e2e/Projects/paws-chrome');
     await page.screenshot({ path: screenshotPaths.restarted });
     await page.waitForTimeout(2_000);
     return { extensionId: injection.extensionId, storageKeys: await readExtensionStorageKeys(bubble) };

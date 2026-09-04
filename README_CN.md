@@ -21,6 +21,10 @@ pnpm verify
 
 构建结果位于 `dist/`，可以通过 `chrome://extensions` 的“加载已解压的扩展程序”安装。
 
+目标选择器会列出全部已绑定机器并标注在线状态，设备名优先使用
+`displayName`、其次使用 `host`。工作目录既可手动输入，也可从历史会话中
+选择，或通过远端目录浏览器逐级选择；每台机器会分别记住最后一次目录。
+
 ## 自动化测试
 
 ```bash
@@ -33,7 +37,7 @@ pnpm test:e2e:ego
 pnpm test:e2e:ego:record
 ```
 
-- `PAWS-CHROME-BUBBLE-01`：使用临时本地协议服务，覆盖绑定、凭证保存、机器选择、目录授权、网页上下文、远端回复、重连与权限边界。
+- `PAWS-CHROME-BUBBLE-01`：使用临时本地协议服务，覆盖绑定、凭证保存、设备名回退、在线/离线机器、历史目录同步、主目录范围内的远端目录浏览、每机路径持久化、目录授权、网页上下文、远端回复、重连与权限边界。
 - `PAWS-CHROME-HTTPS-01`：在 HTTPS 宿主页中加载真实 Manifest V3 扩展，覆盖受信任的 `https://47.115.228.20:8443` 默认地址、主机权限、绑定请求和二维码渲染，防止 Mixed Content 回归。
 - `pnpm test:production:https`：发布前执行的真实生产检查，覆盖 TLS 证书、健康接口、绑定接口与 `/v1/updates` Engine.IO 握手；只会反复更新同一条未认证哨兵绑定记录，不会无限新增探针数据，因此不放进 CI。
 - `PAWS-EGO-LITE-HOST-01`：使用 Ego Lite 一次性浏览器配置，验证真实扩展 iframe、`chrome.storage` 和浏览器完整重启后的重连，不接触用户日常配置，也不连接生产账号。
