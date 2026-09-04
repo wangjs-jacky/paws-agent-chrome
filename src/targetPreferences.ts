@@ -57,6 +57,17 @@ export function resolvePreferredDirectory(input: PreferredDirectoryInput): strin
     return input.homeDirectory.trim() || '~';
 }
 
+export function sessionMatchesTarget(
+    session: Session | undefined,
+    machineId: string,
+    directory: string,
+): boolean {
+    const metadata = record(session?.metadata);
+    return metadata?.machineId === machineId
+        && typeof metadata.path === 'string'
+        && metadata.path.trim() === directory.trim();
+}
+
 function record(value: unknown): Record<string, unknown> | null {
     return value != null && typeof value === 'object' && !Array.isArray(value)
         ? value as Record<string, unknown>

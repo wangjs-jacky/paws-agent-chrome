@@ -19,6 +19,7 @@ import {
     machineHomeDirectory,
     recentDirectoriesForMachine,
     resolvePreferredDirectory,
+    sessionMatchesTarget,
     sortMachinesForPicker,
 } from './targetPreferences';
 
@@ -71,6 +72,7 @@ let directoryBrowserLoading = false;
 let directoryBrowserListing: SuccessfulDirectoryListing | null = null;
 let directoryBrowserError = '';
 let directoryBrowserHint = '';
+let directoryBrowserRequestToken = 0;
 
 window.addEventListener('message', event => {
     if (event.source !== window.parent) return;
@@ -460,6 +462,14 @@ async function connectClient(): Promise<void> {
                 statusText = event.state === 'ready' ? '已连接' : event.state === 'reconnecting' ? '正在重连' : '连接中';
                 render();
             }
+            if (event.type === 'machines') {
+                machines = sortMachinesForPicker(event.machines);
+                render();
+            }
+            if (event.type === 'session') {
+                sessions = [event.session, ...sessions.filter(item => item.id !== event.session.id)];
+                render();
+            }
             if (event.type === 'message' && event.sessionId === config.sessionId) {
                 if (!messages.some(item => item.id === event.message.id)) messages.push(event.message);
                 render();
@@ -485,7 +495,14 @@ async function connectClient(): Promise<void> {
             requests = [];
         }
         applyPreferredDirectory();
-        if (config.sessionId) messages = await client.messages.history(config.sessionId, { limit: 50 });
+        if (config.sessionId) {
+            const savedSession = sessions.find(item => item.id === config.sessionId);
+            if (sessionMatchesTarget(savedSession, config.machineId, config.directory)) {
+                messages = await client.messages.history(config.sessionId, { limit: 50 });
+            } else {
+                clearConversationState();
+            }
+        }
         await saveConfig();
         phase = 'ready';
         statusText = '已连接';
@@ -550,10 +567,7 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
 }
 
 async function resetSession(): Promise<void> {
-    config.sessionId = '';
-    messages = [];
-    requests = [];
-    pendingDirectoryApproval = false;
+    clearConversationState();
     await saveConfig();
     render();
 }
@@ -562,10 +576,7 @@ async function selectMachine(machineId: string): Promise<void> {
     if (machineId === config.machineId) return;
     rememberCurrentDirectory();
     config.machineId = machineId;
-    config.sessionId = '';
-    messages = [];
-    requests = [];
-    pendingDirectoryApproval = false;
+    clearConversationState();
     closeDirectoryBrowser();
     applyPreferredDirectory();
     await saveConfig();
@@ -573,7 +584,9 @@ async function selectMachine(machineId: string): Promise<void> {
 }
 
 async function setCurrentDirectory(value: string): Promise<void> {
-    config.directory = value.trim();
+    const nextDirectory = value.trim();
+    if (nextDirectory !== config.directory) clearConversationState();
+    config.directory = nextDirectory;
     rememberCurrentDirectory();
     pendingDirectoryApproval = false;
     await saveConfig();
@@ -593,8 +606,9 @@ async function openDirectoryBrowser(): Promise<void> {
     directoryBrowserListing = null;
     render();
     const requestedPath = config.directory.trim();
+    const machineId = machine.id;
     const loaded = await loadRemoteDirectory(requestedPath);
-    if (!loaded && requestedPath) {
+    if (!loaded && requestedPath && directoryBrowserOpen && config.machineId === machineId) {
         directoryBrowserHint = '原目录当前不可用，已回到这台机器的主目录。';
         await loadRemoteDirectory('');
     }
@@ -602,11 +616,16 @@ async function openDirectoryBrowser(): Promise<void> {
 
 async function loadRemoteDirectory(path: string): Promise<boolean> {
     if (!client || !config.machineId) return false;
+    const machineId = config.machineId;
+    const requestToken = ++directoryBrowserRequestToken;
     directoryBrowserLoading = true;
     directoryBrowserError = '';
     render();
     try {
-        const result = await client.machines.browseDirectory({ machineId: config.machineId, path });
+        const result = await client.machines.browseDirectory({ machineId, path });
+        if (requestToken !== directoryBrowserRequestToken || config.machineId !== machineId || !directoryBrowserOpen) {
+            return false;
+        }
         if (!result.success) {
             directoryBrowserError = result.error;
             directoryBrowserLoading = false;
@@ -618,6 +637,9 @@ async function loadRemoteDirectory(path: string): Promise<boolean> {
         render();
         return true;
     } catch (cause) {
+        if (requestToken !== directoryBrowserRequestToken || config.machineId !== machineId || !directoryBrowserOpen) {
+            return false;
+        }
         directoryBrowserError = errorMessage(cause);
         directoryBrowserLoading = false;
         render();
@@ -633,12 +655,20 @@ async function chooseBrowsedDirectory(): Promise<void> {
 }
 
 function closeDirectoryBrowser(): void {
+    directoryBrowserRequestToken += 1;
     directoryBrowserOpen = false;
     directoryBrowserLoading = false;
     directoryBrowserListing = null;
     directoryBrowserError = '';
     directoryBrowserHint = '';
     render();
+}
+
+function clearConversationState(): void {
+    config.sessionId = '';
+    messages = [];
+    requests = [];
+    pendingDirectoryApproval = false;
 }
 
 function applyPreferredDirectory(): void {

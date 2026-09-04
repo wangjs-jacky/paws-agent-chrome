@@ -23,6 +23,10 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
         agentRequestPending: false,
         requestResolutionCalls: 0,
         browseRequests: [],
+        studioActive: true,
+        studioActiveAt: Date.now() - 1_000,
+        extraRecentPath: null,
+        extraRecentUpdatedAt: 0,
     };
     const messages = [];
     let linkPublicKey = null;
@@ -75,11 +79,11 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
 
             requireAuthorization(request);
             if (url.pathname === '/v1/machines' && request.method === 'GET') {
-                sendJson(response, machineRecords(secret));
+                sendJson(response, machineRecords(secret, state));
                 return;
             }
             if ((url.pathname === '/v1/sessions' || url.pathname === '/v2/sessions/active') && request.method === 'GET') {
-                const history = historicalSessionRecords(secret);
+                const history = historicalSessionRecords(secret, state);
                 sendJson(response, { sessions: state.sessionCreated ? [sessionRecord(secret, state), ...history] : history });
                 return;
             }
@@ -183,6 +187,16 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
             state.agentRequestPending = true;
             io.emit('update', { body: { t: 'update-session', id: SESSION_ID } });
         },
+        emitStudioActive(active) {
+            state.studioActive = active;
+            state.studioActiveAt = Date.now();
+            io.emit('update', { body: { t: 'update-machine', id: STUDIO_MACHINE_ID } });
+        },
+        emitRecentDirectory(path) {
+            state.extraRecentPath = path;
+            state.extraRecentUpdatedAt = Date.now() + 1_000;
+            io.emit('update', { body: { t: 'new-session', id: 'live-recent-e2e' } });
+        },
         async close() {
             await new Promise(resolve => io.close(resolve));
             if (server.listening) await new Promise(resolve => server.close(resolve));
@@ -190,7 +204,7 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
     };
 }
 
-function machineRecords(secret) {
+function machineRecords(secret, state) {
     const now = Date.now();
     return [
         machineRecord(secret, {
@@ -201,14 +215,14 @@ function machineRecords(secret) {
         }),
         machineRecord(secret, {
             id: STUDIO_MACHINE_ID,
-            active: true,
-            activeAt: now - 1_000,
+            active: state.studioActive,
+            activeAt: state.studioActiveAt,
             metadata: { host: 'studio-mac.local', homeDir: '/Users/studio' },
         }),
         machineRecord(secret, {
             id: RETIRED_MACHINE_ID,
             active: false,
-            activeAt: 0,
+            activeAt: 1,
             metadata: { host: 'retired-mac.local', homeDir: '/Users/retired' },
         }),
     ];
@@ -258,14 +272,24 @@ function sessionRecord(secret, state) {
     };
 }
 
-function historicalSessionRecords(secret) {
+function historicalSessionRecords(secret, state) {
     const now = Date.now();
-    return [
+    const records = [
         historicalSessionRecord(secret, 'recent-e2e', MACHINE_ID, '/Users/e2e/recent-project', now - 1_000),
         historicalSessionRecord(secret, 'older-e2e', MACHINE_ID, '/Users/e2e/older-project', now - 2_000),
         historicalSessionRecord(secret, 'duplicate-e2e', MACHINE_ID, '/Users/e2e/recent-project', now - 3_000),
         historicalSessionRecord(secret, 'recent-studio', STUDIO_MACHINE_ID, '/Users/studio/recent-art', now - 500),
     ];
+    if (state.extraRecentPath) {
+        records.unshift(historicalSessionRecord(
+            secret,
+            'live-recent-e2e',
+            MACHINE_ID,
+            state.extraRecentPath,
+            state.extraRecentUpdatedAt,
+        ));
+    }
+    return records;
 }
 
 function historicalSessionRecord(secret, id, machineId, path, updatedAt) {

@@ -5,6 +5,7 @@ import {
     machineHomeDirectory,
     recentDirectoriesForMachine,
     resolvePreferredDirectory,
+    sessionMatchesTarget,
     sortMachinesForPicker,
 } from '../src/targetPreferences';
 
@@ -92,5 +93,13 @@ describe('target preferences', () => {
             recentDirectories: [],
             homeDirectory: '/home',
         })).toBe('/home');
+    });
+
+    it('accepts a saved session only when both its machine and path match the selected target', () => {
+        const matching = session('matching', 'machine-1', '/Users/jacky/project', 10);
+        expect(sessionMatchesTarget(matching, 'machine-1', '/Users/jacky/project')).toBe(true);
+        expect(sessionMatchesTarget(matching, 'machine-2', '/Users/jacky/project')).toBe(false);
+        expect(sessionMatchesTarget(matching, 'machine-1', '/Users/jacky/other')).toBe(false);
+        expect(sessionMatchesTarget(undefined, 'machine-1', '/Users/jacky/project')).toBe(false);
     });
 });

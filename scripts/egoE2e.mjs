@@ -144,11 +144,12 @@ async function openFirstPage(targetBrowser) {
     await page.waitForTimeout(900);
 
     await bubble.getByText('已连接').waitFor({ timeout: 15_000 });
-    assert.deepEqual(await bubble.getByLabel('远端机器').locator('option').allTextContents(), [
+    const machineOptions = await bubble.getByLabel('远端机器').locator('option').allTextContents();
+    assert.deepEqual(machineOptions.slice(0, 2), [
         'E2E Mac mini · 在线',
         'studio-mac.local · 在线',
-        'retired-mac.local · 离线 · 未记录活跃时间',
     ]);
+    assert.match(machineOptions[2] ?? '', /^retired-mac\.local · 离线 · 最后活跃 /);
     await bubble.getByLabel('远端机器').selectOption('paws-e2e-machine');
     assert.equal(await bubble.getByLabel('远端工作目录').inputValue(), '/Users/e2e/recent-project');
     await bubble.getByRole('button', { name: '浏览远端目录' }).click();
@@ -182,7 +183,7 @@ async function openFirstPage(targetBrowser) {
     fixture.emitAgentRequest();
     await bubble.getByText('Agent 请求：Bash').waitFor();
     await bubble.getByText('echo paws-e2e-safe-request', { exact: false }).waitFor();
-    await bubble.getByText('/tmp/paws-e2e-project', { exact: false }).waitFor();
+    await bubble.locator('pre.request-payload').filter({ hasText: '/tmp/paws-e2e-project' }).waitFor();
     await bubble.getByText('请在 Paws 自有客户端中审批', { exact: false }).waitFor();
     assert.equal(await bubble.getByRole('button', { name: '允许', exact: true }).count(), 0, 'the real extension frame must not expose a request approval control');
     assert.equal(fixture.state.requestResolutionCalls, 0, 'rendering an Agent request must not send a permission RPC');
