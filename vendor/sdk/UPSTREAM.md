@@ -9,3 +9,7 @@ This directory is a minimal, pinned source snapshot of the browser runtime from 
 - Included surface: `PawsAgentClient`, browser account linking, browser credentials, transports, resources, encryption and public browser types
 
 It keeps a fresh clone independently buildable while the SDK is not yet available from npm. Replace the root `workspace:*` dependency with the published SDK version and remove this directory in the same change after npm bootstrap is complete.
+
+Local patch in Chrome v0.0.4: emit a `syncing` connection state and a batched
+`snapshot` event before `ready`, allowing the panel to reuse the initial machine
+and session synchronization without downloading both lists twice.

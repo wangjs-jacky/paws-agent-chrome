@@ -23,7 +23,7 @@ import {
     sortMachinesForPicker,
 } from './targetPreferences';
 
-type Phase = 'booting' | 'signedOut' | 'linking' | 'connecting' | 'ready';
+type Phase = 'booting' | 'signedOut' | 'linking' | 'connecting' | 'connectionFailed' | 'ready';
 
 type LocalConfig = {
     serverUrl: string;
@@ -73,6 +73,7 @@ let directoryBrowserListing: SuccessfulDirectoryListing | null = null;
 let directoryBrowserError = '';
 let directoryBrowserHint = '';
 let directoryBrowserRequestToken = 0;
+let connectionAttempt = 0;
 
 window.addEventListener('message', event => {
     if (event.source !== window.parent) return;
@@ -148,6 +149,7 @@ function renderPanel(): HTMLElement {
 
     if (phase === 'booting' || phase === 'connecting') body.append(renderLoading());
     if (phase === 'signedOut') body.append(renderSignedOut());
+    if (phase === 'connectionFailed') body.append(renderConnectionFailed());
     if (phase === 'linking') body.append(renderLinking());
     if (phase === 'ready') body.append(renderConversation());
     shell.append(body);
@@ -171,7 +173,19 @@ function renderHeader(): HTMLElement {
 
 function renderLoading(): HTMLElement {
     const section = element('section', 'center-state');
-    section.append(element('span', 'spinner'), element('strong', '', phase === 'booting' ? '正在准备' : '正在连接远端会话'), element('p', '', '连接建立后，会话会同步显示在现有 Paws 客户端中。'));
+    section.append(element('span', 'spinner'), element('strong', '', phase === 'booting' ? '正在准备' : statusText), element('p', '', '正在读取机器和会话，网络较慢时可能需要一些时间。超过 45 秒会显示重试入口。'));
+    return section;
+}
+
+function renderConnectionFailed(): HTMLElement {
+    const section = element('section', 'setup-card');
+    section.append(element('h1', '', '暂时无法连接'), element('p', 'muted', '账号绑定已保留。请检查网络和服务地址后重试；凭证失效时可重新绑定。'), element('p', 'muted', config.serverUrl));
+    section.append(primaryButton('重试连接', () => void connectClient()), secondaryButton('重新绑定 / 修改地址', () => {
+        phase = 'signedOut';
+        statusText = '设置连接';
+        errorText = '';
+        render();
+    }));
     return section;
 }
 
@@ -453,13 +467,28 @@ function cancelLink(): void {
 }
 
 async function connectClient(): Promise<void> {
+    const attempt = ++connectionAttempt;
+    phase = 'connecting';
+    statusText = '正在连接服务器';
+    errorText = '';
+    machines = [];
+    sessions = [];
+    render();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
         unsubscribe?.();
         await client?.dispose();
-        client = new PawsAgentClient({ serverUrl: config.serverUrl, credentials, storage });
-        unsubscribe = client.subscribe(event => {
+        const attemptClient = new PawsAgentClient({ serverUrl: config.serverUrl, credentials, storage });
+        client = attemptClient;
+        unsubscribe = attemptClient.subscribe(event => {
+            if (attempt !== connectionAttempt) return;
             if (event.type === 'connection') {
-                statusText = event.state === 'ready' ? '已连接' : event.state === 'reconnecting' ? '正在重连' : '连接中';
+                statusText = event.state === 'ready' ? '已连接' : event.state === 'syncing' ? '正在同步机器和会话' : event.state === 'reconnecting' ? '正在重连' : '正在连接服务器';
+                render();
+            }
+            if (event.type === 'snapshot') {
+                machines = sortMachinesForPicker(event.machines);
+                sessions = event.sessions;
                 render();
             }
             if (event.type === 'machines') {
@@ -483,36 +512,56 @@ async function connectClient(): Promise<void> {
                 render();
             }
         });
-        await client.connect();
-        machines = sortMachinesForPicker(await client.machines.list());
-        sessions = await client.sessions.list();
-        const previousMachineId = config.machineId;
-        const configuredMachine = machines.find(item => item.id === config.machineId && item.active);
-        config.machineId = configuredMachine?.id ?? machines.find(item => item.active)?.id ?? machines[0]?.id ?? '';
-        if (previousMachineId && previousMachineId !== config.machineId) {
-            config.sessionId = '';
-            messages = [];
-            requests = [];
-        }
-        applyPreferredDirectory();
-        if (config.sessionId) {
-            const savedSession = sessions.find(item => item.id === config.sessionId);
-            if (sessionMatchesTarget(savedSession, config.machineId, config.directory)) {
-                messages = await client.messages.history(config.sessionId, { limit: 50 });
-            } else {
-                clearConversationState();
-            }
-        }
-        await saveConfig();
-        phase = 'ready';
-        statusText = '已连接';
-        errorText = '';
-        render();
+        await Promise.race([
+            (async () => {
+                await attemptClient.connect();
+                if (attempt !== connectionAttempt) return;
+                const previousMachineId = config.machineId;
+                const configuredMachine = machines.find(item => item.id === config.machineId && item.active);
+                config.machineId = configuredMachine?.id ?? machines.find(item => item.active)?.id ?? machines[0]?.id ?? '';
+                if (previousMachineId && previousMachineId !== config.machineId) {
+                    config.sessionId = '';
+                    messages = [];
+                    requests = [];
+                }
+                applyPreferredDirectory();
+                if (config.sessionId) {
+                    const savedSession = sessions.find(item => item.id === config.sessionId);
+                    if (sessionMatchesTarget(savedSession, config.machineId, config.directory)) {
+                        statusText = '正在恢复会话消息';
+                        render();
+                        const history = await attemptClient.messages.history(config.sessionId, { limit: 50 });
+                        if (attempt !== connectionAttempt) return;
+                        messages = history;
+                    } else {
+                        clearConversationState();
+                    }
+                }
+                await saveConfig();
+                if (attempt !== connectionAttempt) return;
+                phase = 'ready';
+                statusText = '已连接';
+                errorText = '';
+                render();
+            })(),
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`连接超时（45 秒）：${statusText}。请检查网络后重试。`)), 45_000);
+            }),
+        ]);
     } catch (cause) {
-        phase = 'signedOut';
-        statusText = '需要重新连接';
+        if (attempt !== connectionAttempt) return;
+        connectionAttempt += 1;
+        unsubscribe?.();
+        unsubscribe = null;
+        const failedClient = client;
+        client = null;
+        void failedClient?.dispose();
+        phase = 'connectionFailed';
+        statusText = '连接失败';
         errorText = errorMessage(cause);
         render();
+    } finally {
+        clearTimeout(timer);
     }
 }
 

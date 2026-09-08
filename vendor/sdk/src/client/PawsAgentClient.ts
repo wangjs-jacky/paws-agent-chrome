@@ -45,7 +45,10 @@ export class PawsAgentClient {
             logger: options.logger,
             reconnect: options.reconnect,
             resync: async () => {
-                await Promise.all([machines.list(), sessions.list()]);
+                const [machineSnapshot, sessionSnapshot] = await Promise.all([machines.list(), sessions.list()]);
+                if (!this.disposed) {
+                    this.events.emit({ type: 'snapshot', machines: machineSnapshot, sessions: sessionSnapshot });
+                }
             },
             onUpdate: update => { void this.handleUpdate(update); },
         });
