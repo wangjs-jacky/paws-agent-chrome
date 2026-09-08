@@ -14,8 +14,14 @@ vi.mock('@wangjs-jacky/paws-agent', () => ({
         reject!: (error: Error) => void;
         disposed = false;
         machines = { list: vi.fn(async () => []) };
-        sessions = { list: vi.fn(async () => []) };
-        messages = { history: vi.fn(async () => []) };
+        sessions = {
+            list: vi.fn(async () => []),
+            spawn: vi.fn(async () => ({ type: 'success', sessionId: 'sent-session' })),
+        };
+        messages = {
+            history: vi.fn(async (_id: string) => []),
+            send: vi.fn(async (_input: any) => ({ sessionId: 'sent-session', localId: 'message-1' })),
+        };
         constructor() { fixture.clients.push(this); }
         subscribe(listener: (event: any) => void) { this.listener = listener; return () => { this.listener = () => {}; }; }
         connect() { return new Promise<void>((resolve, reject) => { this.resolve = resolve; this.reject = reject; }); }
@@ -51,6 +57,90 @@ beforeEach(async () => {
     await import('../src/panel');
     await flush();
     click('打开 Paws Agent');
+});
+
+async function readyToSend() {
+    const client = fixture.clients[0];
+    client.listener({ type: 'snapshot', machines: [{ id: 'machine-1', active: true, metadata: { homeDir: '/project' } }], sessions: [] });
+    client.resolve();
+    await flush();
+    enterDraft('original message');
+    return client;
+}
+
+function enterDraft(text: string) {
+    const textarea = document.querySelector('textarea')!;
+    textarea.value = text;
+    textarea.dispatchEvent(new Event('input'));
+}
+
+describe('sending while the conversation changes', () => {
+    it.each(['new conversation', 'directory change'])('does not use an empty ID after %s during send', async action => {
+        const client = await readyToSend();
+        let finishSend!: () => void;
+        client.messages.send.mockImplementationOnce(() => new Promise<void>(resolve => { finishSend = resolve; }));
+        click('发送');
+        await flush();
+        expect(client.messages.send).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'sent-session', text: expect.stringContaining('original message') }));
+        if (action === 'new conversation') click('新会话');
+        else {
+            const directory = document.querySelector<HTMLInputElement>('input[aria-label="远端工作目录"]')!;
+            directory.value = '/different-project';
+            directory.dispatchEvent(new Event('change'));
+        }
+        await flush();
+        enterDraft('next message');
+        finishSend();
+        await flush();
+        expect(client.messages.history).not.toHaveBeenCalled();
+        expect(document.querySelector('textarea')!.value).toBe('next message');
+        expect(JSON.parse(fixture.values.get('paws-agent.chrome.config')!).sessionId).toBe('');
+        expect(document.body.textContent).not.toContain('sessionId is required');
+    });
+
+    it('does not attach or send a late spawn result after the user starts a new conversation', async () => {
+        const client = await readyToSend();
+        let finishSpawn!: (value: any) => void;
+        client.sessions.spawn.mockImplementationOnce(() => new Promise(resolve => { finishSpawn = resolve; }));
+        click('发送');
+        await flush();
+        click('新会话');
+        await flush();
+        enterDraft('next message');
+        finishSpawn({ type: 'success', sessionId: 'old-session' });
+        await flush();
+        expect(client.messages.send).not.toHaveBeenCalled();
+        expect(document.querySelector('textarea')!.value).toBe('next message');
+        expect(document.querySelector('button[type="submit"]')!.textContent).toBe('发送');
+        expect(JSON.parse(fixture.values.get('paws-agent.chrome.config')!).sessionId).toBe('');
+    });
+
+    it('sends the original text even when the draft changes while spawn is pending', async () => {
+        const client = await readyToSend();
+        let finishSpawn!: (value: any) => void;
+        client.sessions.spawn.mockImplementationOnce(() => new Promise(resolve => { finishSpawn = resolve; }));
+        click('发送');
+        await flush();
+        enterDraft('next message');
+        finishSpawn({ type: 'success', sessionId: 'sent-session' });
+        await flush();
+        expect(client.messages.send).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('original message') }));
+        expect(document.querySelector('textarea')!.value).toBe('next message');
+    });
+
+    it('keeps a late error from an abandoned send out of the new conversation', async () => {
+        const client = await readyToSend();
+        let failSend!: (error: Error) => void;
+        client.messages.send.mockImplementationOnce(() => new Promise((_resolve, reject) => { failSend = reject; }));
+        click('发送');
+        await flush();
+        click('新会话');
+        await flush();
+        failSend(new Error('old operation failed'));
+        await flush();
+        expect(document.body.textContent).not.toContain('old operation failed');
+        expect(document.querySelector('button[type="submit"]')!.textContent).toBe('发送');
+    });
 });
 afterEach(() => {
     window.dispatchEvent(new Event('beforeunload'));

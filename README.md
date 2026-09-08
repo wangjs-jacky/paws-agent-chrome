@@ -1,5 +1,11 @@
 # Paws Agent Chrome
 
+Version 0.0.5 fixes switching conversations while sending. Each send captures its
+target and text; late completions cannot overwrite a new conversation or its
+draft. Messages already submitted can still complete in the original session.
+Session reads and realtime updates now fetch only the affected session through
+`GET /v2/sessions/:sessionId`, eliminating full-list downloads on the send path.
+
 Version 0.0.4 fixes stalled startup: the panel reuses the SDK's initial snapshot,
 shows connection/synchronization/history progress, and offers a retry after a
 45-second deadline. Failed attempts are disposed without discarding the account

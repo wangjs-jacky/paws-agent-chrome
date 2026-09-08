@@ -13,3 +13,8 @@ It keeps a fresh clone independently buildable while the SDK is not yet availabl
 Local patch in Chrome v0.0.4: emit a `syncing` connection state and a batched
 `snapshot` event before `ready`, allowing the panel to reuse the initial machine
 and session synchronization without downloading both lists twice.
+
+Local patch in Chrome v0.0.5: session reads use the authenticated
+`GET /v2/sessions/:sessionId` endpoint and verify the returned identity.
+Realtime session updates read only the affected
+session. Sending still checks fresh activity before posting a message.
