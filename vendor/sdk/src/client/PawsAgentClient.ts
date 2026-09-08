@@ -145,10 +145,14 @@ export class PawsAgentClient {
             }
 
             if (record.t === 'update-session' || record.t === 'new-session') {
-                const sessions = await this.sessionsImpl.list();
                 const sessionId = record.id ?? record.sid ?? record.session?.id;
-                const session = sessions.find(candidate => candidate.id === sessionId);
-                if (!session) return;
+                if (typeof sessionId !== 'string' || !sessionId.trim()) return;
+                const session = await this.sessionsImpl.get(sessionId).catch(cause => {
+                    // A session can be deleted between the event and its snapshot read.
+                    if (cause instanceof PawsAgentError && cause.code === 'NOT_FOUND') return null;
+                    throw cause;
+                });
+                if (!session || this.disposed) return;
                 this.events.emit({ type: 'session', session });
                 const state = session.agentState as { requests?: Record<string, unknown> } | null;
                 for (const [id, payload] of Object.entries(state?.requests ?? {})) {

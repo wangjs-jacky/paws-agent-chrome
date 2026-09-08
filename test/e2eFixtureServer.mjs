@@ -87,6 +87,14 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
                 sendJson(response, { sessions: state.sessionCreated ? [sessionRecord(secret, state), ...history] : history });
                 return;
             }
+            if (url.pathname.startsWith('/v2/sessions/') && request.method === 'GET') {
+                const id = decodeURIComponent(url.pathname.slice('/v2/sessions/'.length));
+                const records = historicalSessionRecords(secret, state);
+                if (state.sessionCreated) records.push(sessionRecord(secret, state));
+                const session = records.find(record => record.id === id);
+                sendJson(response, session ? 200 : 404, session ? { session } : { error: 'Session not found' });
+                return;
+            }
             if (url.pathname === `/v3/sessions/${SESSION_ID}/messages` && request.method === 'POST') {
                 const body = await readJson(request);
                 const item = body.messages?.[0];

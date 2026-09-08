@@ -74,6 +74,8 @@ let directoryBrowserError = '';
 let directoryBrowserHint = '';
 let directoryBrowserRequestToken = 0;
 let connectionAttempt = 0;
+let conversationRevision = 0;
+let sendPhase = '';
 
 window.addEventListener('message', event => {
     if (event.source !== window.parent) return;
@@ -385,7 +387,7 @@ function renderRequests(): HTMLElement {
 function renderComposer(): HTMLElement {
     const form = element('form', 'composer') as HTMLFormElement;
     const textarea = document.createElement('textarea');
-    const send = primaryButton(busy ? '发送中…' : '发送', () => undefined);
+    const send = primaryButton(busy ? sendPhase || '发送中…' : '发送', () => undefined);
     send.type = 'submit';
     send.disabled = busy || !draft.trim();
     textarea.placeholder = '告诉远端 Agent 你想做什么…';
@@ -577,18 +579,29 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
         render();
         return;
     }
+    const requestClient = client;
+    const revision = conversationRevision;
+    const isCurrent = () => revision === conversationRevision && client === requestClient;
+    const originalDraft = draft;
+    const text = composePrompt(originalDraft, pageContext, includeContext);
+    const meta = pageContext ? { source: 'paws-agent-chrome', pageUrl: pageContext.url } : { source: 'paws-agent-chrome' };
+    const machineId = config.machineId;
+    const directory = config.directory.trim();
+    let sessionId = config.sessionId;
     busy = true;
+    sendPhase = sessionId ? '正在发送消息…' : '正在创建会话…';
     errorText = '';
     pendingDirectoryApproval = false;
     render();
     try {
-        if (!config.sessionId) {
-            const result = await client.sessions.spawn({
-                machineId: config.machineId,
-                directory: config.directory.trim(),
+        if (!sessionId) {
+            const result = await requestClient.sessions.spawn({
+                machineId,
+                directory,
                 approvedNewDirectoryCreation,
                 agent: 'codex',
             });
+            if (!isCurrent()) return;
             if (result.type === 'requestToApproveDirectoryCreation') {
                 pendingDirectoryApproval = true;
                 busy = false;
@@ -596,20 +609,32 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
                 return;
             }
             if (result.type === 'error') throw new Error(result.errorMessage);
-            config.sessionId = result.sessionId;
+            sessionId = result.sessionId;
+            config.sessionId = sessionId;
             await saveConfig();
+            if (!isCurrent()) return;
         }
-        await client.messages.send({
-            sessionId: config.sessionId,
-            text: composePrompt(draft, pageContext, includeContext),
-            meta: pageContext ? { source: 'paws-agent-chrome', pageUrl: pageContext.url } : { source: 'paws-agent-chrome' },
+        sendPhase = '正在发送消息…';
+        render();
+        await requestClient.messages.send({
+            sessionId,
+            text,
+            meta,
         });
-        draft = '';
-        messages = await client.messages.history(config.sessionId, { limit: 50 });
+        if (!isCurrent()) return;
+        if (draft === originalDraft) draft = '';
+        sendPhase = '正在读取消息…';
+        render();
+        const history = await requestClient.messages.history(sessionId, { limit: 50 });
+        if (!isCurrent()) return;
+        messages = history;
         busy = false;
+        sendPhase = '';
         render();
     } catch (cause) {
+        if (!isCurrent()) return;
         busy = false;
+        sendPhase = '';
         errorText = errorMessage(cause);
         render();
     }
@@ -714,6 +739,10 @@ function closeDirectoryBrowser(): void {
 }
 
 function clearConversationState(): void {
+    conversationRevision += 1;
+    busy = false;
+    sendPhase = '';
+    errorText = '';
     config.sessionId = '';
     messages = [];
     requests = [];
