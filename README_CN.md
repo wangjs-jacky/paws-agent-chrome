@@ -8,7 +8,7 @@
 
 插件最初位于 [`wangjs-jacky/happy`](https://github.com/wangjs-jacky/happy) 的 `packages/paws-agent-chrome`，现从提交 [`42a6773e`](https://github.com/wangjs-jacky/happy/commit/42a6773e38e3ea919ec75cc9286d447b14de2e79) 抽离，以便独立开发、测试和发布。
 
-由于 `@wangjs-jacky/paws-agent` 暂未发布到 npm，仓库在 [`vendor/sdk`](vendor/sdk/UPSTREAM.md) 中固定了一份最小浏览器 SDK 源码快照，保证全新克隆后也能独立构建。npm bootstrap 完成后，只需把根目录依赖换成 registry 版本并删除 vendor 目录，扩展业务代码不需要修改。
+扩展现使用已发布的 [`@wangjs-jacky/paws-agent`](https://www.npmjs.com/package/@wangjs-jacky/paws-agent/v/0.1.0-beta.2) SDK：`package.json` 精确固定为 `0.1.0-beta.2`，`pnpm-lock.yaml` 锁定包完整性，不再维护 vendor 源码副本。SDK 由上游仓库的 GitHub Actions 构建并发布；扩展构建时会打包 SDK 浏览器入口，安装扩展的用户无需安装 npm。
 
 ## 构建
 
@@ -39,6 +39,12 @@ pnpm verify
 升级时，用新版文件替换原解压目录中的文件，保持目录路径不变，然后在
 `chrome://extensions` 的扩展卡片上点击“重新加载”。保持原路径可以保留 unpacked
 扩展的 ID 和已绑定账号的本地存储。
+
+### v0.0.6 SDK 依赖迁移
+
+删除临时 vendor SDK，改用 npm 上的 `0.1.0-beta.2` 精确版本。启动快照复用、
+连接同步状态和按 ID 查询会话等修复已合入上游 SDK；保留 v0.0.4 / v0.0.5 的
+连接恢复与发送期间切换会话保护。
 
 ### v0.0.5 发送修复
 
