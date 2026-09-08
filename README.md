@@ -1,5 +1,11 @@
 # Paws Agent Chrome
 
+Version 0.0.4 fixes stalled startup: the panel reuses the SDK's initial snapshot,
+shows connection/synchronization/history progress, and offers a retry after a
+45-second deadline. Failed attempts are disposed without discarding the account
+binding or target preferences. The recovery screen also provides access to
+account linking and server settings.
+
 [中文说明](README_CN.md)
 
 A Manifest V3 extension that adds a small Paws Agent conversation bubble to Chromium pages. It connects the browser to an existing Paws account, starts a remote Agent session on a selected machine, optionally attaches current-page context, and keeps privileged approvals inside the trusted Paws client.

@@ -1,6 +1,6 @@
 {
   "name": "@wangjs-jacky/paws-agent-chrome",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": true,
   "description": "Paws Agent floating conversation bubble for Chromium browsers",
   "license": "MIT",
@@ -35,6 +35,7 @@
     "@playwright/test": "^1.61.1",
     "@types/qrcode": "^1.5.6",
     "esbuild": "^0.27.2",
+    "happy-dom": "^20.14.0",
     "socket.io": "^4.8.1",
     "tweetnacl": "^1.0.3",
     "typescript": "5.9.3",
