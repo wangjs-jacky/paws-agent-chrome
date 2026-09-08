@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import { expect, it } from 'vitest';
-import { PawsAgentClient } from '../vendor/sdk/src/client/PawsAgentClient';
+import { PawsAgentClient } from '@wangjs-jacky/paws-agent';
 
 it('delivers the initial synchronized snapshot before reporting ready', async () => {
     const paths: string[] = [];

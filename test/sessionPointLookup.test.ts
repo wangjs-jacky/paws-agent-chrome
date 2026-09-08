@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { PawsAgentClient } from '../vendor/sdk/src/client/PawsAgentClient';
+import { PawsAgentClient } from '@wangjs-jacky/paws-agent';
 
 let client: PawsAgentClient;
 let io: Server;

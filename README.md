@@ -1,5 +1,9 @@
 # Paws Agent Chrome
 
+Version 0.0.6 replaces the temporary vendored SDK with the published npm package
+`@wangjs-jacky/paws-agent`, pinned to `0.1.0-beta.2`. The startup snapshot and
+point-session lookup fixes are now maintained upstream in the SDK.
+
 Version 0.0.5 fixes switching conversations while sending. Each send captures its
 target and text; late completions cannot overwrite a new conversation or its
 draft. Messages already submitted can still complete in the original session.
@@ -20,7 +24,7 @@ A Manifest V3 extension that adds a small Paws Agent conversation bubble to Chro
 
 The extension originally lived at `packages/paws-agent-chrome` in [`wangjs-jacky/happy`](https://github.com/wangjs-jacky/happy). It was extracted from commit [`42a6773e`](https://github.com/wangjs-jacky/happy/commit/42a6773e38e3ea919ec75cc9286d447b14de2e79) so the browser surface can evolve, test, and release independently.
 
-The browser subset of the Paws Agent SDK is temporarily pinned under [`vendor/sdk`](vendor/sdk/UPSTREAM.md) because `@wangjs-jacky/paws-agent` is not yet published to npm. This is a minimal source dependency, not a second product surface. Once npm bootstrap is complete, the repository is designed to switch to the registry package without changing extension code.
+The extension uses the published [`@wangjs-jacky/paws-agent`](https://www.npmjs.com/package/@wangjs-jacky/paws-agent/v/0.1.0-beta.2) SDK, pinned to `0.1.0-beta.2` in `package.json` and integrity-locked in `pnpm-lock.yaml`. There is no vendored SDK copy. The SDK is built and published through GitHub Actions in the upstream repository; the browser bundle includes its browser entry point, so installation of the extension does not require npm.
 
 ## Build
 
