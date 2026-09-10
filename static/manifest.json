@@ -4,6 +4,7 @@
   "description": "Start and continue remote Paws Agent sessions from the current page.",
   "version": "0.0.2",
   "permissions": ["storage"],
+  "background": { "service_worker": "background.js" },
   "host_permissions": [
     "https://47.115.228.20:8443/*"
   ],
@@ -17,7 +18,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["panel.html", "panel.js", "styles.css"],
+      "resources": ["panel.html", "panel.js", "styles.css", "annotation-popup.css"],
       "matches": ["<all_urls>"]
     }
   ]

@@ -1,0 +1,33 @@
+import { expect, it } from 'vitest';
+import { createAnnotationCoordinator } from '../src/annotationRuntime';
+import { AnnotationStore } from '../src/annotationStore';
+import { annotation } from './annotationFixture';
+it('uses genuine runtime identity, rejects spoofed frames and never exposes credentials or send', async () => {
+    const data = new Map<string, string>(); const storage = { get: async (k: string) => data.get(k) ?? null, set: async (k: string, v: string) => { data.set(k, v); }, remove: async (k: string) => { data.delete(k); } };
+    const handle = createAnnotationCoordinator(new AnnotationStore(storage), storage, 'extension-id');
+    const sender = { id: 'extension-id', tab: { id: 7 }, frameId: 0, url: annotation.url };
+    const update = { type: 'annotations:upsert', url: annotation.url, annotation, owner: 'spoofed' };
+    expect(await handle(update, sender)).toMatchObject({ ok: true });
+    expect(await handle({ type: 'annotations:list', url: annotation.url }, sender)).toMatchObject({ ok: true, annotations: [{ comment: '为什么需要桥接？' }] });
+    expect(await handle(update, { ...sender, frameId: 9 })).toMatchObject({ ok: false });
+    expect(await handle(update, { ...sender, id: 'other' })).toMatchObject({ ok: false });
+    expect(await handle(update, { ...sender, url: 'https://evil.example/' })).toMatchObject({ ok: false });
+    expect(await handle({ type: 'send', text: 'injected' }, sender)).toMatchObject({ ok: false });
+    expect(await handle({ type: 'credentials' }, sender)).toMatchObject({ ok: false });
+    expect(await handle({ type: 'annotations:acknowledge', url: annotation.url, batch: {} }, sender)).toMatchObject({ ok: false });
+    expect(await handle({ type: 'annotations:list', url: annotation.url }, { ...sender, tab: { id: 8 } })).toMatchObject({ annotations: [] });
+    const freshSession = { ...storage, get: async () => null }; const restarted = createAnnotationCoordinator(new AnnotationStore(storage), freshSession, 'extension-id');
+    expect(await restarted({ type: 'annotations:list', url: annotation.url }, sender)).toMatchObject({ annotations: [] });
+});
+it('rejects a panel whose source page was never synchronized and allows accepted panel acknowledgement', async () => {
+    const data = new Map<string, string>(); const storage = { get: async (k: string) => data.get(k) ?? null, set: async (k: string, v: string) => { data.set(k, v); }, remove: async (k: string) => { data.delete(k); } };
+    const handle = createAnnotationCoordinator(new AnnotationStore(storage), storage, 'extension-id');
+    const panel = { id: 'extension-id', tab: { id: 7 }, frameId: 1, url: 'chrome-extension://extension-id/panel.html' };
+    expect(await handle({ type: 'annotations:list', url: annotation.url }, panel)).toMatchObject({ ok: false });
+    await handle({ type: 'annotations:upsert', url: annotation.url, annotation }, { ...panel, frameId: 0, url: annotation.url });
+    const result = await handle({ type: 'annotations:acknowledge', url: annotation.url, batch: { id: 'batch', pageKey: annotation.pageKey, annotations: [annotation], prompt: 'q' } }, panel);
+    expect(result).toMatchObject({ ok: true, annotations: [] });
+    await handle({ type: 'annotations:upsert', url: annotation.url, annotation }, { ...panel, frameId: 0, url: annotation.url });
+    await handle.forgetTab(7);
+    expect(await handle({ type: 'annotations:list', url: annotation.url }, { ...panel, frameId: 0, url: annotation.url })).toMatchObject({ annotations: [] });
+});

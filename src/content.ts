@@ -1,9 +1,12 @@
+import { mountAnnotationOverlay } from './annotationOverlay';
 const FRAME_ID = 'paws-agent-bubble-frame';
 const COLLAPSED_SIZE = 76;
 const EXPANDED_WIDTH = 390;
 const EXPANDED_HEIGHT = 640;
 
 if (window === window.top && !document.getElementById(FRAME_ID)) {
+    const disposeAnnotations = mountAnnotationOverlay();
+    window.addEventListener('pagehide', disposeAnnotations, { once: true });
     const frame = document.createElement('iframe');
     frame.id = FRAME_ID;
     frame.dataset.pawsAgentBubble = 'true';
@@ -44,6 +47,13 @@ if (window === window.top && !document.getElementById(FRAME_ID)) {
         sendPageContext(frame);
     });
     document.documentElement.append(frame);
+    let lastUrl = location.href;
+    const pageIdentityPoll = setInterval(() => {
+        if (location.href === lastUrl) return;
+        lastUrl = location.href;
+        sendPageContext(frame);
+    }, 500);
+    window.addEventListener('pagehide', () => clearInterval(pageIdentityPoll), { once: true });
 }
 
 function sendPageContext(frame: HTMLIFrameElement): void {

@@ -1,5 +1,56 @@
 # Paws Agent Chrome
 
+This branch adds local Agentation batch questions. It is a local evaluation
+build, with no version bump or publication authorization. Agentation 3.0.2 uses
+PolyForm Shield; see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). The project's MIT
+license does not replace dependency licenses.
+
+To build and try the synthetic fixture without installing into your usual browser:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm test
+pnpm typecheck
+pnpm build
+node scripts/startAnnotationFixture.mjs
+```
+
+Open the printed local URL in Ego. The fixture supplies a fake linked account,
+simulated extension runtime/storage, and encrypted synthetic SDK replies. It is
+not an installed MV3 test and never uses production credentials. It includes
+article/conversation passages, duplicate text, hidden/input secrets, SPA route
+controls, and send/storage-failure controls.
+
+Use **开启批注** at bottom-left, select visible text within a paragraph (including
+inline formatting) or click an element, then save a question in the real
+Agentation popup. Use the list/markers to edit, delete or locate it; Esc exits
+capture. Open the paw bubble to preview; only **确认发送** submits the frozen prompt
+to its displayed target. New/edited drafts survive earlier acknowledgement.
+Unknown send results retain drafts and require inspecting the conversation
+before a manual retry. A history failure after acceptance reports that the
+message was already sent. Settings start collapsed; target, status, new-session
+control and current-session link stay visible.
+
+Drafts use extension storage and a tab-lifecycle namespace plus full URL identity.
+Refresh restores within that tab; browser-restart recovery is not guaranteed.
+Closing a tab abandons its namespace. The panel offers **清空当前页面批注**.
+Query/hash are omitted from batch prompts unless the full-link checkbox is
+enabled. Limits: 20 questions/page, 2,000 characters/question, 6,000 quoted
+characters, 2,000 neighbor characters, 40,000 prompt characters. Truncation is
+marked; excessive questions/prompts are blocked.
+
+The adapter bundles public `AnnotationPopupCSS` and `getElementPath`, not the
+storage-backed toolbar. Only its exact popup stylesheet is extracted into Shadow
+DOM; component logic and node_modules are unchanged. The public import also
+installs upstream timer wrappers in its JavaScript world. MV3 content-script
+isolation separates those from page JavaScript; the synthetic fixture shares its
+page world. Freeze mode is never enabled. The visible overlay is not secret from
+the host website. Cross-block selections, browser internal/PDF pages, cross-origin
+frames, arbitrary Shadow DOM and virtualized missing text are outside this first
+version. Relocation validates visible quote/context with a bounded fallback; it
+may report a changed location instead of guessing. Browser verification coverage
+is recorded separately in `docs/evidence/agentation-local.md`.
+
 Version 0.0.6 replaces the temporary vendored SDK with the published npm package
 `@wangjs-jacky/paws-agent`, pinned to `0.1.0-beta.2`. The startup snapshot and
 point-session lookup fixes are now maintained upstream in the SDK.
@@ -36,6 +87,12 @@ pnpm verify
 ```
 
 The unpacked extension is written to `dist/`.
+
+The current-session row below the target picker shows the session ID (hover for
+the full ID) and **Open in Paws**. It opens the configured Paws Web session in a
+new tab without replacing the host page. New conversations show a placeholder
+until creation succeeds; changing the machine or directory clears the old link.
+Paws Web must be signed in separately; the extension does not transfer credentials.
 
 ## Install a release
 

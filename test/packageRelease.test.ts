@@ -7,6 +7,10 @@ import { afterEach, describe, expect, test } from 'vitest';
 
 const releaseScript = resolve('scripts/packageRelease.mjs');
 const extensionFiles = [
+    'THIRD_PARTY_NOTICES',
+    'annotation-popup.css',
+    'background.js',
+    'background.js.map',
     'content.js',
     'content.js.map',
     'manifest.json',
