@@ -33,3 +33,23 @@ it('validates a precise locator without scanning an unrelated long conversation'
     expect(findAnnotationTarget({ quote: 'Native Messaging', prefix: 'Browser ', suffix: ' today', elementPath: '#target' })?.id).toBe('target');
     expect(styles.mock.calls.length).toBeLessThan(30); styles.mockRestore();
 });
+it('rejects a cross-paragraph range inside a generic application container', () => {
+    document.body.innerHTML = '<div id="app"><p>unselected earlier conversation</p><p id="start">Native Messaging</p><p id="end">second question</p><p>unselected later conversation</p></div>';
+    const range = document.createRange(); range.setStart(document.querySelector('#start')!.firstChild!, 0); range.setEnd(document.querySelector('#end')!.firstChild!, 6);
+    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
+    expect(captureSelection()).toBeNull();
+});
+it.each([false, true])('bounds pre-selection work and retained context with hidden=%s local nodes', hidden => {
+    document.body.innerHTML = '<p id="local">' + `<span${hidden ? ' hidden' : ''}>x</span>`.repeat(4000) + 'Native Messaging' + 's'.repeat(20000) + '</p>';
+    const text = document.querySelector('#local')!.lastChild!; const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 16);
+    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
+    const next = vi.spyOn(TreeWalker.prototype, 'nextNode'), previous = vi.spyOn(TreeWalker.prototype, 'previousNode');
+    try {
+        const captured = captureSelection();
+        expect(captured?.quote).toBe('Native Messaging');
+        expect(captured?.prefix).toBe(hidden ? '' : 'x'.repeat(1000));
+        expect(captured?.suffix).toBe('s'.repeat(1000));
+        expect(captured?.truncated).toBe(true);
+        expect(next.mock.calls.length + previous.mock.calls.length).toBeLessThanOrEqual(2002);
+    } finally { next.mockRestore(); previous.mockRestore(); }
+});
