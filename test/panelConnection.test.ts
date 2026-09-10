@@ -92,6 +92,46 @@ async function annotationReady() {
     await flush(); return client;
 }
 describe('annotation batch confirmation', () => {
+    it('restores cached panel connection and draft polling once without replaying a send', async () => {
+        const client = await annotationReady(); enterDraft('unsent draft');
+        window.dispatchEvent(new Event('beforeunload'));
+        expect(client.disposed).toBe(true);
+        const show = new Event('pageshow'); Object.defineProperty(show, 'persisted', { value: true });
+        window.dispatchEvent(show); window.dispatchEvent(show); await flush();
+        expect(fixture.clients).toHaveLength(2);
+        const restored = fixture.clients[1];
+        restored.listener({ type: 'snapshot', machines: [{ id: 'machine-1', active: true, metadata: { homeDir: '/project' } }], sessions: [] });
+        restored.resolve(); await flush();
+        fixture.annotations = [{ ...fixture.annotations[0], revision: 2, comment: 'restored page question' }];
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(document.querySelector('[aria-label="页面批注"]')?.textContent ?? '').toContain('restored page question');
+        expect(document.querySelector('textarea')?.value).toBe('unsent draft');
+        expect(client.messages.send).not.toHaveBeenCalled(); expect(restored.messages.send).not.toHaveBeenCalled();
+    });
+    it.each(['success', 'failure'])('ignores a late acknowledgement %s after the page changes', async outcome => {
+        const client = await annotationReady();
+        const originalRequest = chrome.runtime.sendMessage;
+        let resolveAcknowledgement!: (value: unknown) => void;
+        let rejectAcknowledgement!: (reason: Error) => void;
+        vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation(message => {
+            if ((message as { type: string }).type !== 'annotations:acknowledge') return originalRequest(message);
+            return new Promise((resolve, reject) => { resolveAcknowledgement = resolve; rejectAcknowledgement = reject; });
+        });
+        click('发送'); click('确认发送'); await flush();
+        expect(resolveAcknowledgement).toBeTypeOf('function');
+        const nextUrl = 'https://example.com/next';
+        const { pageKeyForUrl } = await import('../src/annotations');
+        fixture.annotations = [{ ...fixture.annotations[0], id: 'next', url: nextUrl, pageKey: pageKeyForUrl(nextUrl), comment: 'new page question', quote: 'new page quote' }];
+        window.dispatchEvent(new MessageEvent('message', { source: window.parent, data: { type: 'paws:page-context', context: { title: 'next', url: nextUrl, selection: '' } } }));
+        await flush();
+        expect(document.querySelector('[aria-label="页面批注"]')?.textContent ?? '').toContain('new page question');
+        if (outcome === 'success') resolveAcknowledgement({ ok: true, annotations: [] });
+        else rejectAcknowledgement(new Error('old page acknowledgement failed'));
+        await flush(); click('设置');
+        expect(document.querySelector('[aria-label="页面批注"]')?.textContent ?? '').toContain('new page question');
+        expect(document.body.textContent).not.toContain('old page acknowledgement failed');
+        expect(client.messages.history).not.toHaveBeenCalled();
+    });
     it('recovers preview availability after a transient draft synchronization error', async () => {
         await annotationReady(); fixture.runtimeError = 'draft storage temporarily unavailable'; await vi.advanceTimersByTimeAsync(1000);
         expect(document.body.textContent).toContain('无法读取批注'); fixture.runtimeError = ''; await vi.advanceTimersByTimeAsync(1000);

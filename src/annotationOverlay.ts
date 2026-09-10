@@ -18,23 +18,31 @@ export function mountAnnotationOverlay(): () => void {
     const popup = document.createElement('div'); popup.className = 'popup'; const reactRoot = createRoot(popup);
     const markers = document.createElement('div'); shadow.append(style, css, controls, markers, popup); document.documentElement.append(host);
     let active = false, disposed = false, url = location.href, annotations: PageAnnotation[] = [], error = '', editing: PageAnnotation | null = null, captured: Capture | null = null, saving = false;
+    let popupGeneration = 0;
     function button(text: string, handler: () => void) { const b = document.createElement('button'); b.textContent = text; b.type = 'button'; b.addEventListener('click', handler); return b; }
-    function cancel() { captured = null; editing = null; reactRoot.render(null); }
+    function cancel() { popupGeneration += 1; captured = null; editing = null; reactRoot.render(null); }
     function locate(a: PageAnnotation) { const target = findAnnotationTarget(a); if (!target) { error = '原文位置已变化：' + a.quote; render(); return; } target.scrollIntoView?.({ block: 'center', behavior: 'smooth' }); const old = target.style.outline; target.style.outline = '3px solid #2563eb'; setTimeout(() => { target.style.outline = old; }, 1600); }
-    async function mutate(message: Record<string, unknown>) {
+    async function mutate(message: Record<string, unknown>, originatingPopup?: number) {
         if (saving) return; const source = url; saving = true;
-        try { const result = await draftRequest({ ...message, url: source }); if (disposed || source !== url) return; annotations = result; error = ''; cancel(); }
-        catch (cause) { if (source === url && !disposed) error = `未保存：${cause instanceof Error ? cause.message : '存储失败'}。请保留当前问题后重试。`; }
+        try {
+            const result = await draftRequest({ ...message, url: source });
+            if (disposed || source !== url) return;
+            annotations = result;
+            if (originatingPopup === undefined || originatingPopup === popupGeneration) error = '';
+            if (originatingPopup === popupGeneration) cancel();
+        }
+        catch (cause) { if (source === url && !disposed && (originatingPopup === undefined || originatingPopup === popupGeneration)) error = `未保存：${cause instanceof Error ? cause.message : '存储失败'}。请保留当前问题后重试。`; }
         finally { saving = false; if (!disposed) render(); }
     }
     function open(c: Capture, a: PageAnnotation | null = null) {
+        const generation = ++popupGeneration;
         captured = c; editing = a;
-        reactRoot.render(createElement(AnnotationPopupCSS, { key: a ? `${a.id}:${a.revision}` : crypto.randomUUID(), element: a ? '编辑批注' : '页面批注', selectedText: c.quote, initialValue: a?.comment ?? '', placeholder: '记录你对这段内容的问题…', submitLabel: '保存批注', lightMode: !matchMedia('(prefers-color-scheme: dark)').matches, style: { left: Math.max(160, Math.min(innerWidth / 2, innerWidth - 430)), top: Math.max(24, Math.min(100, innerHeight - 300)) }, onCancel: cancel,
+        reactRoot.render(createElement(AnnotationPopupCSS, { key: generation, element: a ? '编辑批注' : '页面批注', selectedText: c.quote, initialValue: a?.comment ?? '', placeholder: '记录你对这段内容的问题…', submitLabel: '保存批注', lightMode: !matchMedia('(prefers-color-scheme: dark)').matches, style: { left: Math.max(160, Math.min(innerWidth / 2, innerWidth - 430)), top: Math.max(24, Math.min(100, innerHeight - 300)) }, onCancel: () => { if (generation === popupGeneration) cancel(); },
             onSubmit: comment => {
-                if (!captured || saving) return;
-                try { const value = normalizeAnnotation({ ...captured, id: editing?.id ?? crypto.randomUUID(), revision: (editing?.revision ?? 0) + 1, pageKey: pageKeyForUrl(url), title: document.title.slice(0, 1000), url, comment, createdAt: editing?.createdAt ?? Date.now() }); void mutate({ type: 'annotations:upsert', annotation: value }); }
+                if (!captured || saving || generation !== popupGeneration) return;
+                try { const value = normalizeAnnotation({ ...captured, id: editing?.id ?? crypto.randomUUID(), revision: (editing?.revision ?? 0) + 1, pageKey: pageKeyForUrl(url), title: document.title.slice(0, 1000), url, comment, createdAt: editing?.createdAt ?? Date.now() }); void mutate({ type: 'annotations:upsert', annotation: value }, generation); }
                 catch (cause) { error = `未保存：${(cause as Error).message}`; render(); }
-            }, onDelete: a ? () => void mutate({ type: 'annotations:remove', id: a.id }) : undefined }));
+            }, onDelete: a ? () => { if (generation === popupGeneration) void mutate({ type: 'annotations:remove', id: a.id }, generation); } : undefined }));
     }
     function render() {
         controls.replaceChildren(button(active ? '退出批注 · Esc' : '开启批注', () => { active = !active; if (!active) cancel(); render(); }));

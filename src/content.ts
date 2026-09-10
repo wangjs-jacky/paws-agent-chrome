@@ -5,8 +5,6 @@ const EXPANDED_WIDTH = 390;
 const EXPANDED_HEIGHT = 640;
 
 if (window === window.top && !document.getElementById(FRAME_ID)) {
-    const disposeAnnotations = mountAnnotationOverlay();
-    window.addEventListener('pagehide', disposeAnnotations, { once: true });
     const frame = document.createElement('iframe');
     frame.id = FRAME_ID;
     frame.dataset.pawsAgentBubble = 'true';
@@ -47,13 +45,37 @@ if (window === window.top && !document.getElementById(FRAME_ID)) {
         sendPageContext(frame);
     });
     document.documentElement.append(frame);
+    let disposeAnnotations: (() => void) | null = null;
+    let pageIdentityPoll: ReturnType<typeof setInterval> | undefined;
     let lastUrl = location.href;
-    const pageIdentityPoll = setInterval(() => {
-        if (location.href === lastUrl) return;
+    function startPageResources(): void {
+        if (disposeAnnotations) return;
+        disposeAnnotations = mountAnnotationOverlay();
         lastUrl = location.href;
+        pageIdentityPoll = setInterval(() => {
+            if (location.href === lastUrl) return;
+            lastUrl = location.href;
+            sendPageContext(frame);
+        }, 500);
+    }
+    function onPageHide(event: PageTransitionEvent): void {
+        disposeAnnotations?.();
+        disposeAnnotations = null;
+        clearInterval(pageIdentityPoll);
+        pageIdentityPoll = undefined;
+        if (!event.persisted) {
+            window.removeEventListener('pagehide', onPageHide);
+            window.removeEventListener('pageshow', onPageShow);
+        }
+    }
+    function onPageShow(event: PageTransitionEvent): void {
+        if (!event.persisted) return;
+        startPageResources();
         sendPageContext(frame);
-    }, 500);
-    window.addEventListener('pagehide', () => clearInterval(pageIdentityPoll), { once: true });
+    }
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
+    startPageResources();
 }
 
 function sendPageContext(frame: HTMLIFrameElement): void {

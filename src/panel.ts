@@ -87,7 +87,8 @@ let includeFullUrl = false;
 let annotationPreview: AnnotationPreview | null = null;
 let approvedPreview: AnnotationPreview | null = null;
 let annotationSyncRunning = false;
-const annotationPoll = setInterval(() => void syncAnnotations(), 1000);
+let annotationPoll = setInterval(() => void syncAnnotations(), 1000);
+let pageResourcesSuspended = false;
 
 window.addEventListener('message', event => {
     if (event.source !== window.parent) return;
@@ -106,11 +107,30 @@ window.addEventListener('message', event => {
     if (expanded && phase === 'ready') render();
 });
 
-window.addEventListener('beforeunload', () => {
+function suspendPageResources(): void {
+    if (pageResourcesSuspended) return;
+    pageResourcesSuspended = true;
+    conversationRevision += 1;
+    connectionAttempt += 1;
+    busy = false;
+    sendPhase = '';
+    pendingDirectoryApproval = false;
+    annotationPreview = null;
+    approvedPreview = null;
     clearInterval(annotationPoll);
     linkController?.abort();
     unsubscribe?.();
     void client?.dispose();
+}
+window.addEventListener('beforeunload', suspendPageResources);
+window.addEventListener('pagehide', suspendPageResources);
+window.addEventListener('pageshow', event => {
+    if (!event.persisted || !pageResourcesSuspended || !root.isConnected) return;
+    pageResourcesSuspended = false;
+    annotationPoll = setInterval(() => void syncAnnotations(), 1000);
+    void syncAnnotations();
+    if (client) void connectClient();
+    else if (phase === 'linking') { phase = 'signedOut'; statusText = '未连接'; render(); }
 });
 
 void initialize();
@@ -720,7 +740,16 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
         clearTimeout(timer);
         if (!isCurrent()) return;
         approvedPreview = null;
-        if (preview) { try { pageAnnotations = await draftRequest({ type: 'annotations:acknowledge', url: preview.url, batch: preview.batch }); } catch (cause) { annotationError = `消息已发送，但草稿确认失败：${errorMessage(cause)}。请先查看会话，避免重复发送。`; } }
+        if (preview) {
+            try {
+                const acknowledgedAnnotations = await draftRequest({ type: 'annotations:acknowledge', url: preview.url, batch: preview.batch });
+                if (!isCurrent() || pageContext?.url !== preview.url) return;
+                pageAnnotations = acknowledgedAnnotations;
+            } catch (cause) {
+                if (!isCurrent() || pageContext?.url !== preview.url) return;
+                annotationError = `消息已发送，但草稿确认失败：${errorMessage(cause)}。请先查看会话，避免重复发送。`;
+            }
+        }
         if (!isCurrent()) return;
         if (draft === originalDraft) draft = '';
         sendPhase = '正在读取消息…';
