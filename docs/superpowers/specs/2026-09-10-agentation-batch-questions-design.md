@@ -2,7 +2,7 @@
 
 日期：2026-09-10
 
-状态：聊天中的第一版范围已获用户确认；本文待用户审阅。尚未实施、安装依赖或获得第三方发布授权。
+状态：用户已确认设计并要求直接开发，不再要求用户重复审阅；随后明确表示没有作者授权、先用起来。本轮按本地评估版本推进，不公开分发，也不把用户的决定表述为第三方许可。
 
 ## 1. 目标与边界
 
@@ -95,7 +95,7 @@ Agentation 的组件/依赖随扩展本地打包，不使用 CDN、远程脚本�
 
 Agentation 当前许可证为 PolyForm Shield，包含竞争性产品限制；当前项目自身为 MIT，不能把第三方组件重新标为 MIT。
 
-用户确认技术路线不等于作者许可，内部集成也不自动豁免。依赖纳入前需记录精确版本及许可，并确认目标使用方式可接受；若无法确认，停止依赖集成并请求授权方向。不得删除或隐藏许可声明。
+用户确认技术路线不等于作者许可，内部集成也不自动豁免。用户已明确要求先本地使用；依赖纳入时记录精确版本与许可，保留所有许可声明。此决定只调整本地实施范围，不认定许可适用性或提供公开分发授权。
 
 本设计不授权联系作者、推送 GitHub、合并 PR、发布 npm/ZIP 或安装到用户常用 Chrome。公开分发必须另行解决许可并得到发布确认。v0.0.7 仍保持暂停。
 
@@ -120,4 +120,20 @@ Agentation 当前许可证为 PolyForm Shield，包含竞争性产品限制；�
 
 本文已核对第一版边界、上下文泄露、宿主页面信任边界、超时重试语义、并发草稿、定位降级和第三方许可。未承诺跨端配置、可靠结构化回答或服务端幂等能力。
 
-用户审阅本文后进入 writing-plans，拆分依赖/授权检查、批注适配、草稿协调、面板与批次发送、回归验收。实现前任何不满足本设计的上游能力差异都要显式报告。
+已进入 writing-plans 前置检查。用户不再需要重复审阅设计或选择执行方式；后续在当前会话顺序执行。任何不满足本设计的上游能力差异都要显式报告。
+
+## 10. 2026-09-10 接入检查结果
+
+- npm `latest` 确认为 3.0.2；注册表元数据与实际发布 tarball 的 `package/LICENSE` 均包含 PolyForm Shield 竞争性使用限制。这不是仅凭 GitHub 的许可标签推断。
+- 抽查 npm 0.0.2、1.0.0、2.3.3 的 license 字段均为 `PolyForm-Shield-1.0.0`。不能声称已排查所有历史版本，也没有证据支持通过降级取得 MIT 许可。
+- 上游 `package/src/components/page-toolbar-css/index.tsx` 提供 `onAnnotationAdd`、`onAnnotationDelete`、`onAnnotationUpdate`、`onAnnotationsClear`、`onSubmit` 等回调；但公开 props 未提供关闭本地存储、替换存储适配器或受控恢复 annotations 的接口。
+- 该组件直接访问宿主 `localStorage` 保存设置、主题、位置，并通过存储工具保存批注；省略 `endpoint` 不会关闭这些存储，提供 `endpoint` 也不是隐私隔离方案。
+- 因此不能原样嵌入完整组件并同时声称满足第 6 节。后续需在使用许可明确后评估公开低层组件与扩展自有状态结合的适配方案；若必须修改第三方核心，先显式说明维护成本，不默默扩大范围。
+- 后续用户明确要求先本地使用，因此继续实施：使用公开 `AnnotationPopupCSS` 与元素识别工具，插件自己负责受控状态、存储和发送，不嵌入完整工具条，也不 fork 第三方核心。现有会话跳转改动保留，未推送、发布或联系作者。
+
+证据来源：
+
+- https://registry.npmjs.org/agentation/-/agentation-3.0.2.tgz 中的 `package/LICENSE`
+- https://github.com/benjitaylor/agentation/blob/main/package/src/components/page-toolbar-css/index.tsx
+- `npm view agentation@latest version license dist.tarball --json`
+- `npm view agentation@0.0.2 version license --json`、`npm view agentation@1.0.0 version license --json`、`npm view agentation@2.3.3 version license --json`
