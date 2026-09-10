@@ -40,7 +40,7 @@
 
 **Interfaces:** Define and export `PageAnnotation` (id, revision, pageKey, title, url, quote, prefix, suffix, elementPath, comment, createdAt, truncated), `AnnotationBatch` (id, pageKey, annotations snapshot, prompt), and pure `composeAnnotationPrompt(message, annotations, includeFullUrl): string`. Store operations must expose `list(owner, pageKey)`, `upsert(owner, annotation)`, `remove(owner, pageKey, id)`, and `acknowledge(owner, batch)` (names may be encapsulated by a repository, but semantics stay exact). All stored data is validated on restore, and runtime errors are explicit.
 
-- [ ] Step 1: Add RED tests for prompt context, caps, sensitive URL omission, revision-safe acknowledgement and isolation. Example independent expectations:
+- [x] Step 1: Add RED tests for prompt context, caps, sensitive URL omission, revision-safe acknowledgement and isolation. Example independent expectations:
 
 ```ts
 expect(composeAnnotationPrompt('', [annotation], false)).toContain('为什么需要桥接？');
@@ -54,14 +54,14 @@ expect(await store.list('tab-b', annotation.pageKey)).toEqual([]);
 
 Run focused `pnpm exec vitest run test/annotations.test.ts test/annotationStore.test.ts`; record the expected missing-feature failures. Implement validation, storage serialization, immutable snapshots and compare-and-remove; rerun to GREEN. Persist draft failures as a visible unsaved state, not swallowed exceptions.
 
-- [ ] Step 2: Add RED tests for a legitimate runtime draft update and rejected spoofed/wrong-frame messages; tests must prove no credential response or send action exists at the page boundary. Implement minimal runtime messaging and extension-owned storage coordinator. Use actual runtime sender tab/frame identity; never trust page-supplied ownership. Capture a per-tab lifecycle nonce via extension session storage or equivalent so tab ID reuse after restart cannot leak stale drafts. Validate source URL/page identity at synchronization boundaries. Mutations serialize per draft collection.
+- [x] Step 2: Add RED tests for a legitimate runtime draft update and rejected spoofed/wrong-frame messages; tests must prove no credential response or send action exists at the page boundary. Implement minimal runtime messaging and extension-owned storage coordinator. Use actual runtime sender tab/frame identity; never trust page-supplied ownership. Capture a per-tab lifecycle nonce via extension session storage or equivalent so tab ID reuse after restart cannot leak stale drafts. Validate source URL/page identity at synchronization boundaries. Mutations serialize per draft collection.
 
 ```ts
 expect(await handleMessage({ type: 'send', text: 'injected' }, pageSender)).toEqual({ ok: false, error: expect.any(String) });
 // A fake browser runtime/storage boundary is permitted; assert persisted draft and denial effects.
 ```
 
-- [ ] Step 3: Add RED tests for selection capture rejecting inputs, passwords, contenteditable and hidden elements; ambiguous/missing text relocation returns no match. Capture only selected text plus a bounded visible neighbor context (not ancestor full textContent). Implement pageKey including SPA query/hash identity and best-effort relocation using validated quote/context, never coordinates alone.
+- [x] Step 3: Add RED tests for selection capture rejecting inputs, passwords, contenteditable and hidden elements; ambiguous/missing text relocation returns no match. Capture only selected text plus a bounded visible neighbor context (not ancestor full textContent). Implement pageKey including SPA query/hash identity and best-effort relocation using validated quote/context, never coordinates alone.
 
 ```ts
 document.body.innerHTML = '<p>Native Messaging</p><input type="password" value="secret">';
@@ -70,11 +70,11 @@ document.body.innerHTML = '<p>same</p><p>same</p>';
 expect(findAnnotationTarget(quoteOnlySame)).toBeNull();
 ```
 
-- [ ] Step 4: Install exact `agentation@3.0.2`, React and React DOM matching exact installed version, with type dependencies. Preserve SDK pin. Use the public AnnotationPopupCSS and identification exports; verify the shipped popup can be bundled without the whole toolbar's storage effects. Do not edit node_modules or fork upstream. Add real-popup DOM tests proving entered feedback reaches extension draft storage without host localStorage writes. Any unavoidable upstream styling constraints must be disclosed, not silently replaced with an imitation.
+- [x] Step 4: Install exact `agentation@3.0.2`, React and React DOM matching exact installed version, with type dependencies. Preserve SDK pin. Use the public AnnotationPopupCSS and identification exports; verify the shipped popup can be bundled without the whole toolbar's storage effects. Do not edit node_modules or fork upstream. Add real-popup DOM tests proving entered feedback reaches extension draft storage without host localStorage writes. Any unavoidable upstream styling constraints must be disclosed, not silently replaced with an imitation.
 
-- [ ] Step 5: Implement minimal original-page overlay: activation control, escape/cancel, text selection or element click, Agentation popup, marker/list editing and deletion, page lifecycle cleanup. Render isolated styles using Shadow DOM where compatible; if the upstream CSS is injected into document head, scope/extract only the required CSS into the overlay build without altering upstream behavior. Avoid click-through, z-index overlap with panel, and stale captures after navigation. Capture mode only intercepts deliberate user input. Add events/DOM tests for mode off, save, edit, cancel and teardown.
+- [x] Step 5: Implement minimal original-page overlay: activation control, escape/cancel, text selection or element click, Agentation popup, marker/list editing and deletion, page lifecycle cleanup. Render isolated styles using Shadow DOM where compatible; if the upstream CSS is injected into document head, scope/extract only the required CSS into the overlay build without altering upstream behavior. Avoid click-through, z-index overlap with panel, and stale captures after navigation. Capture mode only intercepts deliberate user input. Add events/DOM tests for mode off, save, edit, cancel and teardown.
 
-- [ ] Step 6: Add failing panel tests for collapsed gear, visible target, annotation-only submit and preview cancel/confirm. Implement draft list/preview in `annotationPanel.ts`; settings are collapsed by default but error/connection/target remain visible. Keep current session link and new-conversation control accessible. Preview is extension-origin UI and shows exactly the outgoing prompt/target. Ordinary non-annotation sending remains compatible.
+- [x] Step 6: Add failing panel tests for collapsed gear, visible target, annotation-only submit and preview cancel/confirm. Implement draft list/preview in `annotationPanel.ts`; settings are collapsed by default but error/connection/target remain visible. Keep current session link and new-conversation control accessible. Preview is extension-origin UI and shows exactly the outgoing prompt/target. Ordinary non-annotation sending remains compatible.
 
 ```ts
 expect(document.querySelector('[aria-label="远端工作目录"]')?.closest('[hidden]')).not.toBeNull();
@@ -86,11 +86,11 @@ expect(sentMessages).toHaveLength(1);
 expect(sentMessages[0].text).toContain('Native Messaging');
 ```
 
-- [ ] Step 7: Extend send-state RED tests for frozen previews, simultaneous new/edit drafts, failures, timeout ambiguity, duplicate clicks, navigation and target/session changes. Implement immutable batch submission through existing SDK, awaiting definitive acceptance before acknowledgement. No auto retry. If send completion is unknown, retain drafts and visibly warn to inspect the conversation before retry. History-fetch failure after accepted send is distinct from send failure and must not invite duplicate submission. A stale async completion must not clear new drafts or populate a new session. Directory approval must retain/validate the exact previewed batch and target.
+- [x] Step 7: Extend send-state RED tests for frozen previews, simultaneous new/edit drafts, failures, timeout ambiguity, duplicate clicks, navigation and target/session changes. Implement immutable batch submission through existing SDK, awaiting definitive acceptance before acknowledgement. No auto retry. If send completion is unknown, retain drafts and visibly warn to inspect the conversation before retry. History-fetch failure after accepted send is distinct from send failure and must not invite duplicate submission. A stale async completion must not clear new drafts or populate a new session. Directory approval must retain/validate the exact previewed batch and target.
 
-- [ ] Step 8: Add fixture controls/data for a synthetic article and conversation with unique and duplicate passages, a hidden secret, input field and SPA route change. Do not use production credentials/content. Build fixture support for the new extension runtime protocol while clearly labelling it simulated, not installed MV3.
+- [x] Step 8: Add fixture controls/data for a synthetic article and conversation with unique and duplicate passages, a hidden secret, input field and SPA route change. Do not use production credentials/content. Build fixture support for the new extension runtime protocol while clearly labelling it simulated, not installed MV3.
 
-- [ ] Step 9: Run `pnpm test`, `pnpm typecheck`, `pnpm build`, `git diff --check`; inspect bundle/storage/license output. Write THIRD_PARTY_NOTICES and README local evaluation instructions, preserving earlier session-link docs. Commit only explicit feature files (including earlier overlapping session-link edits only with clear commit description); never stage unrelated files or the controller's plan/evidence edits. No version bump or publication. Report red/green commands, changed files, constraints and test output.
+- [x] Step 9: Run `pnpm test`, `pnpm typecheck`, `pnpm build`, `git diff --check`; inspect bundle/storage/license output. Write THIRD_PARTY_NOTICES and README local evaluation instructions, preserving earlier session-link docs. Commit only explicit feature files (including earlier overlapping session-link edits only with clear commit description); never stage unrelated files or the controller's plan/evidence edits. No version bump or publication. Report red/green commands, changed files, constraints and test output.
 
 ### Task 2: Ego browser acceptance and final handoff
 
@@ -98,11 +98,15 @@ expect(sentMessages[0].text).toContain('Native Messaging');
 
 **Interfaces:** Consume the built extension and Task 1 fixture. No live Paws message is needed for synthetic UI acceptance. Any actual production check requires separate authority.
 
-- [ ] Read browser-control, ego-ops and ego-browser skills/references; launch only Ego and isolate a numeric task space/tab.
-- [ ] Validate fixture state for initial gear, explicit text and element annotation, real popup, edit/delete, refresh restore, two page identities, safe URL preview, one confirmed batch and response/session link.
-- [ ] Verify spoofed page messages cannot trigger sends; failed/unknown submission retains drafts; original page interaction works outside annotation mode; dark/light fit and keyboard/IME behavior.
-- [ ] Capture each meaningful verified round with captureVerifiedBrowserStep and send the private screenshot path to Happy report_browser_step once per round. Show final screenshot via Happy send_image. Record exact run IDs, URLs and whether the runtime is synthetic or actually installed MV3.
-- [ ] Request a final independent code review, fix confirmed Important findings with focused regression tests, rerun unit/type/build checks. Leave the local feature available without push/release and report any unverified MV3 or production behavior explicitly.
+- [x] Read browser-control, ego-ops and ego-browser skills/references; launch only Ego and isolate a numeric task space/tab.
+- [x] Validate fixture state for initial gear, explicit text and element annotation, real popup, edit/delete, refresh restore, two page identities, safe URL preview, one confirmed batch and response/session link.
+- [x] Verify spoofed page messages cannot trigger sends; failed/unknown submission retains drafts; original page interaction works outside annotation mode; dark/light fit and keyboard/IME behavior.
+- [x] Capture each meaningful verified round with captureVerifiedBrowserStep and send the private screenshot path to Happy report_browser_step once per round. Show final screenshot via Happy send_image. Record exact run IDs, URLs and whether the runtime is synthetic or actually installed MV3.
+- [x] Request a final independent code review, fix confirmed Important findings with focused regression tests, rerun unit/type/build checks. Leave the local feature available without push/release and report any unverified MV3 or production behavior explicitly.
+
+## Execution note
+
+Task 1 and Task 2 are complete for local evaluation. Three task-review findings and one whole-branch capture-boundary finding were fixed and passed scoped re-review. Final controller checks passed 90 tests, typecheck, build and diff-check at 30881cf. Synthetic browser workflows and final-build screenshots are recorded in `docs/evidence/agentation-local.md`. Keyboard coverage includes Escape, Chinese text entry and CDP IME composition/commit, not OS candidate-window testing. Runtime spoof denial is covered by unit tests, not an installed-MV3 browser run. Actual installation, native BFCache eligibility, production sends and publication remain outside this local-evaluation scope. The local branch/worktree is preserved; no merge or push was performed.
 
 ## Plan self-review
 
