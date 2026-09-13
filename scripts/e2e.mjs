@@ -194,6 +194,7 @@ try {
     await reloadedBubble.getByRole('button', { name: '打开 Paws Agent' }).click();
     await waitForExpandedFrame(page);
     await reloadedBubble.getByText('已连接').waitFor({ timeout: 15_000 });
+    await reloadedBubble.getByRole('button', { name: '设置', exact: true }).click();
     assert.equal(await reloadedBubble.getByText('把这个浏览器连接到 Paws').count(), 0, 'stored credentials must survive reload');
     assert.equal(await reloadedBubble.getByLabel('远端机器').inputValue(), 'paws-studio-machine');
     await expectInputValue(reloadedBubble.getByLabel('远端工作目录'), '/Users/studio/recent-art');
