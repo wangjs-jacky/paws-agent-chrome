@@ -1,0 +1,2 @@
+import { pageKeyForUrl } from '../src/annotations';
+export const annotation = { id: 'one', revision: 1, pageKey: pageKeyForUrl('https://example.com/article?token=secret#one'), title: 'Bridge', url: 'https://example.com/article?token=secret#one', quote: 'Native Messaging', prefix: 'Browser uses ', suffix: ' to reach the host.', elementPath: 'p', comment: '为什么需要桥接？', createdAt: 1, truncated: false };

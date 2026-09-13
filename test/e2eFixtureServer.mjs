@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { Server as SocketServer } from 'socket.io';
 import tweetnacl from 'tweetnacl';
+import { build } from 'esbuild';
+import { fileURLToPath } from 'node:url';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -12,7 +14,9 @@ const RETIRED_MACHINE_ID = 'paws-retired-machine';
 const SESSION_ID = 'paws-e2e-session';
 const TOKEN = 'paws-e2e-token';
 
-export async function startE2eFixtureServer(extensionDir, { injectContentScript = true } = {}) {
+export async function startE2eFixtureServer(extensionDir, { injectContentScript = true, syntheticLinkedAccount = false } = {}) {
+    const runtimeBundle = injectContentScript ? (await build({ entryPoints: [fileURLToPath(new URL('./fixtureRuntime.ts', import.meta.url))], bundle: true, write: false, format: 'iife', platform: 'browser' })).outputFiles[0].text : '';
+    const fixtureStorage = { local: {}, session: {} };
     const secret = tweetnacl.randomBytes(32);
     const state = {
         authRequests: 0,
@@ -27,6 +31,8 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
         studioActiveAt: Date.now() - 1_000,
         extraRecentPath: null,
         extraRecentUpdatedAt: 0,
+        failNextSend: false,
+        failStorage: false,
     };
     const messages = [];
     let linkPublicKey = null;
@@ -42,13 +48,23 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
         const url = new URL(request.url ?? '/', 'http://127.0.0.1');
         try {
             if (url.pathname === '/') {
-                const contentScript = injectContentScript ? '<script src="/content.js"></script>' : '';
-                send(response, 200, `<!doctype html><html><head><title>Paws Extension E2E Fixture</title></head><body><main><h1>Remote debugging fixture</h1><p id="issue">Payment failed with code 42</p></main>${contentScript}</body></html>`, 'text/html; charset=utf-8');
+                const contentScript = injectContentScript ? '<script src="/fixture-runtime.js"></script><script src="/content.js"></script>' : '';
+                send(response, 200, `<!doctype html><html><head><title>Paws Extension E2E Fixture</title><style>body{font:18px/1.8 system-ui;max-width:900px;margin:60px auto;padding:0 32px 220px;background:#f8f6f0;color:#292724}article{background:white;padding:28px;border-radius:18px;margin:24px 0}button{padding:9px;margin:4px}label{display:block}</style></head><body><main><h1>Native Messaging：浏览器与本机之间的桥</h1><p role="note">${injectContentScript ? 'SIMULATED runtime / storage — 本地夹具，非已安装 MV3；所有账号和回复均为合成数据。' : 'Local synthetic article — real installed MV3 required.'}</p><article><h2>一、通信边界</h2><p id="native-messaging">浏览器扩展通过 Native Messaging 与本机进程交换 JSON 消息。桥接让浏览器在受控边界内调用本机工具。</p><p id="issue">Payment failed with code 42</p><p id="duplicate-one">相同段落用于验证定位歧义。</p><p id="duplicate-two">相同段落用于验证定位歧义。</p><p hidden id="hidden-secret">SYNTHETIC_HIDDEN_SECRET_MUST_NOT_CAPTURE</p><label>合成密码 <input id="secret-input" type="password" value="SYNTHETIC_PASSWORD"></label><div contenteditable="true">合成可编辑文本，不应采集</div></article><article><h2>二、模拟会话</h2><p id="conversation-user">用户：为什么远端工具需要设备授权？</p><p id="conversation-agent">Agent：权限检查在每一次工具调用之前发生。</p></article><section><button id="route-change">切换 SPA 页面</button><button id="route-restore">返回原页面</button><span id="route-status">/</span><button id="send-failure">下次发送模拟失败</button><button id="storage-failure">模拟存储失败</button><button id="storage-restore">恢复存储</button></section></main><script src="/fixture-controls.js"></script>${contentScript}</body></html>`, 'text/html; charset=utf-8');
                 return;
             }
+            if (url.pathname === '/fixture-runtime.js') { send(response, 200, runtimeBundle, 'text/javascript'); return; }
+            if (url.pathname === '/fixture-controls.js') { send(response, 200, await readFile(new URL('./fixtureControls.js', import.meta.url)), 'text/javascript'); return; }
+            if (url.pathname === '/__fixture-control' && request.method === 'POST') { const body = await readJson(request); for (const key of ['failNextSend', 'failStorage']) if (typeof body[key] === 'boolean') state[key] = body[key]; sendJson(response, { ok: true }); return; }
+            if (url.pathname === '/__fixture-storage' && request.method === 'POST') {
+                const body = await readJson(request); const area = fixtureStorage[body.area]; if (!area) throw new Error('invalid storage area');
+                if (body.op === 'get') { sendJson(response, { [body.key]: area[body.key] }); return; }
+                if (body.op === 'set') { if (state.failStorage && Object.keys(body.items).some(k => k.startsWith('paws.annotations.'))) { sendJson(response, 507, { error: 'synthetic quota' }); return; } Object.assign(area, body.items); }
+                if (body.op === 'remove') delete area[body.key]; sendJson(response, { ok: true }); return;
+            }
             const staticPath = url.pathname.slice(1);
-            if (['content.js', 'panel.js', 'panel.html', 'styles.css'].includes(staticPath)) {
-                const content = await readFile(join(extensionDir, staticPath));
+            if (['content.js', 'panel.js', 'panel.html', 'styles.css', 'annotation-popup.css'].includes(staticPath)) {
+                let content = await readFile(join(extensionDir, staticPath));
+                if (staticPath === 'panel.html' && injectContentScript) content = content.toString().replace('<script src="panel.js">', '<script src="/fixture-runtime.js"></script><script src="panel.js">');
                 const contentType = extname(staticPath) === '.js'
                     ? 'text/javascript; charset=utf-8'
                     : extname(staticPath) === '.css' ? 'text/css; charset=utf-8' : 'text/html; charset=utf-8';
@@ -57,6 +73,12 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
             }
             if (url.pathname === '/__state') {
                 sendJson(response, state);
+                return;
+            }
+            // A synthetic destination for checking the extension's new-tab handoff,
+            // not an authenticated Paws Web session page.
+            if (url.pathname === `/session/${SESSION_ID}` && state.sessionCreated) {
+                send(response, 200, `<!doctype html><html><head><title>Session navigation fixture</title></head><body><h1>Session navigation fixture</h1><p data-session-id="${SESSION_ID}">${SESSION_ID}</p></body></html>`, 'text/html; charset=utf-8');
                 return;
             }
             if (url.pathname === '/v1/auth/account/request' && request.method === 'POST') {
@@ -96,6 +118,7 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
                 return;
             }
             if (url.pathname === `/v3/sessions/${SESSION_ID}/messages` && request.method === 'POST') {
+                if (state.failNextSend) { state.failNextSend = false; sendJson(response, 503, { error: 'Synthetic send failure' }); return; }
                 const body = await readJson(request);
                 const item = body.messages?.[0];
                 if (typeof item?.content !== 'string' || typeof item?.localId !== 'string') {
@@ -187,6 +210,10 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('E2E fixture did not bind');
     const origin = `http://127.0.0.1:${address.port}`;
+    if (syntheticLinkedAccount) {
+        fixtureStorage.local['paws-agent.credentials'] = JSON.stringify({ token: TOKEN, secret: toBase64(secret) });
+        fixtureStorage.local['paws-agent.chrome.config'] = JSON.stringify({ serverUrl: origin, machineId: MACHINE_ID, directory: '/tmp/paws-e2e-project', directoriesByMachine: { [MACHINE_ID]: '/tmp/paws-e2e-project' }, sessionId: '' });
+    }
 
     return {
         origin,

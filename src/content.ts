@@ -1,3 +1,4 @@
+import { mountAnnotationOverlay } from './annotationOverlay';
 const FRAME_ID = 'paws-agent-bubble-frame';
 const COLLAPSED_SIZE = 76;
 const EXPANDED_WIDTH = 390;
@@ -44,6 +45,37 @@ if (window === window.top && !document.getElementById(FRAME_ID)) {
         sendPageContext(frame);
     });
     document.documentElement.append(frame);
+    let disposeAnnotations: (() => void) | null = null;
+    let pageIdentityPoll: ReturnType<typeof setInterval> | undefined;
+    let lastUrl = location.href;
+    function startPageResources(): void {
+        if (disposeAnnotations) return;
+        disposeAnnotations = mountAnnotationOverlay();
+        lastUrl = location.href;
+        pageIdentityPoll = setInterval(() => {
+            if (location.href === lastUrl) return;
+            lastUrl = location.href;
+            sendPageContext(frame);
+        }, 500);
+    }
+    function onPageHide(event: PageTransitionEvent): void {
+        disposeAnnotations?.();
+        disposeAnnotations = null;
+        clearInterval(pageIdentityPoll);
+        pageIdentityPoll = undefined;
+        if (!event.persisted) {
+            window.removeEventListener('pagehide', onPageHide);
+            window.removeEventListener('pageshow', onPageShow);
+        }
+    }
+    function onPageShow(event: PageTransitionEvent): void {
+        if (!event.persisted) return;
+        startPageResources();
+        sendPageContext(frame);
+    }
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
+    startPageResources();
 }
 
 function sendPageContext(frame: HTMLIFrameElement): void {

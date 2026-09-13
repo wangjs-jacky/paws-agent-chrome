@@ -14,6 +14,10 @@ import QRCode from 'qrcode';
 import { createChromeStorage } from './chromeStorage';
 import { composePrompt, type PageContext } from './pageContext';
 import { DEFAULT_SERVER_URL, normalizeServerUrl } from './serverUrl';
+import { sessionWebUrl } from './sessionLink';
+import { createAnnotationBatch, type PageAnnotation } from './annotations';
+import { draftRequest } from './annotationRuntime';
+import { renderAnnotationList, renderAnnotationPreview, type AnnotationPreview } from './annotationPanel';
 import {
     machineDisplayName,
     machineHomeDirectory,
@@ -44,6 +48,7 @@ const root: HTMLElement = rootElement;
 
 let phase: Phase = 'booting';
 let expanded = false;
+let settingsOpen = false;
 let config: LocalConfig = {
     serverUrl: DEFAULT_SERVER_URL,
     machineId: '',
@@ -76,6 +81,14 @@ let directoryBrowserRequestToken = 0;
 let connectionAttempt = 0;
 let conversationRevision = 0;
 let sendPhase = '';
+let pageAnnotations: PageAnnotation[] = [];
+let annotationError = '';
+let includeFullUrl = false;
+let annotationPreview: AnnotationPreview | null = null;
+let approvedPreview: AnnotationPreview | null = null;
+let annotationSyncRunning = false;
+let annotationPoll = setInterval(() => void syncAnnotations(), 1000);
+let pageResourcesSuspended = false;
 
 window.addEventListener('message', event => {
     if (event.source !== window.parent) return;
@@ -85,14 +98,39 @@ window.addEventListener('message', event => {
         return;
     }
     if (message?.type !== 'paws:page-context' || !isPageContext(message.context)) return;
+    if (pageContext?.url !== message.context.url) {
+        conversationRevision += 1; busy = false; sendPhase = ''; pendingDirectoryApproval = false;
+        annotationPreview = null; approvedPreview = null; pageAnnotations = [];
+    }
     pageContext = message.context;
+    void syncAnnotations();
     if (expanded && phase === 'ready') render();
 });
 
-window.addEventListener('beforeunload', () => {
+function suspendPageResources(): void {
+    if (pageResourcesSuspended) return;
+    pageResourcesSuspended = true;
+    conversationRevision += 1;
+    connectionAttempt += 1;
+    busy = false;
+    sendPhase = '';
+    pendingDirectoryApproval = false;
+    annotationPreview = null;
+    approvedPreview = null;
+    clearInterval(annotationPoll);
     linkController?.abort();
     unsubscribe?.();
     void client?.dispose();
+}
+window.addEventListener('beforeunload', suspendPageResources);
+window.addEventListener('pagehide', suspendPageResources);
+window.addEventListener('pageshow', event => {
+    if (!event.persisted || !pageResourcesSuspended || !root.isConnected) return;
+    pageResourcesSuspended = false;
+    annotationPoll = setInterval(() => void syncAnnotations(), 1000);
+    void syncAnnotations();
+    if (client) void connectClient();
+    else if (phase === 'linking') { phase = 'signedOut'; statusText = '未连接'; render(); }
 });
 
 void initialize();
@@ -169,7 +207,23 @@ function renderHeader(): HTMLElement {
     close.type = 'button';
     close.setAttribute('aria-label', '收起 Paws Agent');
     close.addEventListener('click', () => setExpanded(false));
-    header.append(identity, close);
+    const actions = element('div', 'header-actions');
+    if (phase === 'ready') {
+        const settings = element('button', 'icon-button settings-button', '⚙');
+        settings.type = 'button';
+        settings.setAttribute('aria-label', '设置');
+        settings.setAttribute('aria-expanded', String(settingsOpen));
+        settings.setAttribute('aria-controls', 'target-settings');
+        settings.addEventListener('click', () => {
+            settingsOpen = !settingsOpen;
+            if (!settingsOpen) closeDirectoryBrowser();
+            render();
+            document.querySelector<HTMLButtonElement>('[aria-label="设置"]')?.focus();
+        });
+        actions.append(settings);
+    }
+    actions.append(close);
+    header.append(identity, actions);
     return header;
 }
 
@@ -236,7 +290,11 @@ function renderLinking(): HTMLElement {
 
 function renderConversation(): HTMLElement {
     const container = element('div', 'conversation');
-    container.append(renderTargetPicker());
+    const settings = element('div', 'target-settings');
+    settings.id = 'target-settings';
+    settings.hidden = !settingsOpen;
+    settings.append(renderTargetPicker());
+    container.append(renderTargetSummary(), settings, renderSessionReference());
     if (directoryBrowserOpen) {
         container.append(renderDirectoryBrowser());
         return container;
@@ -248,8 +306,49 @@ function renderConversation(): HTMLElement {
         approval.append(element('span', '', `远端目录不存在：${config.directory}`), primaryButton('允许创建并继续', () => void sendDraft(true)));
         container.append(approval);
     }
+    if (annotationError) container.append(element('div', 'notice notice-error', annotationError));
+    if (pageAnnotations.length) container.append(renderAnnotationList(pageAnnotations, id => void removeAnnotation(id), () => void clearAnnotations()));
+    if (annotationPreview) container.append(renderAnnotationPreview(annotationPreview, () => { const preview = annotationPreview; if (!preview || busy) return; annotationPreview = null; approvedPreview = preview; void sendDraft(false); }, () => { annotationPreview = null; render(); }));
     container.append(renderComposer());
     return container;
+}
+
+function renderTargetSummary(): HTMLElement {
+    const section = element('section', 'target-summary');
+    section.setAttribute('aria-label', '当前执行目标');
+    const target = secondaryButton('', () => { settingsOpen = true; render(); });
+    target.classList.add('target-summary-button');
+    const machine = selectedMachine();
+    const label = machine ? machineDisplayName(machine) : '选择执行设备';
+    const status = machine ? (machine.active ? '在线' : '离线') : '未配置';
+    target.title = `${label} · ${status}\n${config.directory || '选择工作目录'}`;
+    target.setAttribute('aria-label', '更改执行目标');
+    target.append(element('span', 'target-summary-name', `${label} · ${status}`), element('span', 'target-summary-path', config.directory || '选择工作目录'));
+    section.append(target, secondaryButton('新会话', () => void resetSession()));
+    return section;
+}
+
+function renderSessionReference(): HTMLElement {
+    const section = element('section', 'session-reference');
+    section.setAttribute('aria-label', '当前会话');
+    const identity = element('div', 'session-identity');
+    identity.append(element('span', 'session-caption', '当前会话：'));
+    const id = element('span', 'session-id', config.sessionId || '尚未创建');
+    if (config.sessionId) id.title = config.sessionId;
+    identity.append(id);
+    section.append(identity);
+    const href = sessionWebUrl(config.serverUrl, config.sessionId);
+    if (href) {
+        const link = document.createElement('a');
+        link.className = 'session-link';
+        link.href = href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = '在 Paws 中打开 ↗';
+        link.setAttribute('aria-label', '在 Paws 中打开当前会话（新标签页）');
+        section.append(link);
+    }
+    return section;
 }
 
 function renderTargetPicker(): HTMLElement {
@@ -265,8 +364,7 @@ function renderTargetPicker(): HTMLElement {
     }
     machine.value = config.machineId;
     machine.addEventListener('change', () => { void selectMachine(machine.value); });
-    const reset = secondaryButton('新会话', () => void resetSession());
-    row.append(machine, reset);
+    row.append(machine);
 
     const directoryRow = element('div', 'directory-row');
     const directory = document.createElement('input');
@@ -389,13 +487,13 @@ function renderComposer(): HTMLElement {
     const textarea = document.createElement('textarea');
     const send = primaryButton(busy ? sendPhase || '发送中…' : '发送', () => undefined);
     send.type = 'submit';
-    send.disabled = busy || !draft.trim();
+    send.disabled = busy || (!draft.trim() && !pageAnnotations.length);
     textarea.placeholder = '告诉远端 Agent 你想做什么…';
     textarea.value = draft;
     textarea.rows = 3;
     textarea.addEventListener('input', () => {
         draft = textarea.value;
-        send.disabled = busy || !draft.trim();
+        send.disabled = busy || (!draft.trim() && !pageAnnotations.length);
     });
     textarea.addEventListener('keydown', event => {
         if (event.key === 'Enter' && !event.shiftKey) {
@@ -411,8 +509,21 @@ function renderComposer(): HTMLElement {
     checkbox.addEventListener('change', () => { includeContext = checkbox.checked; });
     contextLabel.append(checkbox, element('span', '', pageContext?.selection ? '带上选中内容' : '带上当前网页'));
     footer.append(contextLabel, send);
+    if (pageAnnotations.length) {
+        const full = element('label', 'context-toggle'); const check = document.createElement('input'); check.type = 'checkbox'; check.checked = includeFullUrl;
+        check.addEventListener('change', () => { includeFullUrl = check.checked; annotationPreview = null; });
+        full.append(check, element('span', '', '包含完整链接（query/hash）')); form.append(full);
+    }
     form.append(textarea, footer);
-    form.addEventListener('submit', event => { event.preventDefault(); void sendDraft(false); });
+    form.addEventListener('submit', event => {
+        event.preventDefault(); if (busy) return;
+        if (pageAnnotations.length) {
+            try { if (annotationError) throw new Error(annotationError); const batch = createAnnotationBatch(draft, pageAnnotations, includeFullUrl); annotationPreview = Object.freeze({ batch, target: `${machineDisplayName(selectedMachine()!)} · ${config.directory}`, machineId: config.machineId, directory: config.directory.trim(), sessionId: config.sessionId, revision: conversationRevision, originalDraft: draft, url: pageContext!.url }); errorText = ''; }
+            catch (cause) { errorText = errorMessage(cause); }
+            render(); return;
+        }
+        void sendDraft(false);
+    });
     return form;
 }
 
@@ -568,7 +679,9 @@ async function connectClient(): Promise<void> {
 }
 
 async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
-    if (!client || busy || !draft.trim() || !config.machineId || !config.directory.trim()) {
+    const preview = approvedPreview;
+    if (preview && (preview.revision !== conversationRevision || preview.machineId !== config.machineId || preview.directory !== config.directory.trim() || preview.sessionId !== config.sessionId || preview.url !== pageContext?.url)) { approvedPreview = null; errorText = '发送目标或页面已变化，请重新预览。'; render(); return; }
+    if (!client || busy || (!draft.trim() && !preview) || !config.machineId || !config.directory.trim()) {
         if (!config.machineId) errorText = '没有可用的在线机器。';
         else if (!config.directory.trim()) errorText = '请先填写远端工作目录。';
         render();
@@ -582,9 +695,9 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
     const requestClient = client;
     const revision = conversationRevision;
     const isCurrent = () => revision === conversationRevision && client === requestClient;
-    const originalDraft = draft;
-    const text = composePrompt(originalDraft, pageContext, includeContext);
-    const meta = pageContext ? { source: 'paws-agent-chrome', pageUrl: pageContext.url } : { source: 'paws-agent-chrome' };
+    const originalDraft = preview?.originalDraft ?? draft;
+    const text = preview?.batch.prompt ?? composePrompt(originalDraft, pageContext, includeContext);
+    const meta = preview ? { source: 'paws-agent-chrome', annotationBatchId: preview.batch.id } : pageContext ? { source: 'paws-agent-chrome', pageUrl: pageContext.url } : { source: 'paws-agent-chrome' };
     const machineId = config.machineId;
     const directory = config.directory.trim();
     let sessionId = config.sessionId;
@@ -593,6 +706,8 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
     errorText = '';
     pendingDirectoryApproval = false;
     render();
+    let accepted = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
         if (!sessionId) {
             const result = await requestClient.sessions.spawn({
@@ -616,11 +731,25 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
         }
         sendPhase = '正在发送消息…';
         render();
-        await requestClient.messages.send({
+        await Promise.race([requestClient.messages.send({
             sessionId,
             text,
             meta,
-        });
+        }), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('发送结果待确认：等待超过 45 秒，请先查看会话再决定是否重试。')), 45000); })]);
+        accepted = true;
+        clearTimeout(timer);
+        if (!isCurrent()) return;
+        approvedPreview = null;
+        if (preview) {
+            try {
+                const acknowledgedAnnotations = await draftRequest({ type: 'annotations:acknowledge', url: preview.url, batch: preview.batch });
+                if (!isCurrent() || pageContext?.url !== preview.url) return;
+                pageAnnotations = acknowledgedAnnotations;
+            } catch (cause) {
+                if (!isCurrent() || pageContext?.url !== preview.url) return;
+                annotationError = `消息已发送，但草稿确认失败：${errorMessage(cause)}。请先查看会话，避免重复发送。`;
+            }
+        }
         if (!isCurrent()) return;
         if (draft === originalDraft) draft = '';
         sendPhase = '正在读取消息…';
@@ -635,10 +764,31 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
         if (!isCurrent()) return;
         busy = false;
         sendPhase = '';
-        errorText = errorMessage(cause);
+        approvedPreview = null;
+        errorText = accepted ? `消息已发送，但读取历史失败：${errorMessage(cause)}。请在 Paws 中查看会话。` : `发送结果待确认：${errorMessage(cause)}。草稿已保留，请先查看会话再决定是否重试。`;
         render();
+    } finally {
+        clearTimeout(timer);
     }
 }
+
+async function syncAnnotations(): Promise<void> {
+    if (!pageContext || annotationSyncRunning || typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
+    const url = pageContext.url; annotationSyncRunning = true;
+    try {
+        const next = await draftRequest({ type: 'annotations:list', url });
+        if (pageContext?.url !== url) return;
+        const recovered = annotationError.startsWith('无法读取批注草稿：');
+        const changed = JSON.stringify(next) !== JSON.stringify(pageAnnotations);
+        pageAnnotations = next;
+        if (recovered) annotationError = '';
+        if (changed || recovered) render();
+    }
+    catch (cause) { if (pageContext?.url === url) { annotationError = `无法读取批注草稿：${errorMessage(cause)}`; render(); } }
+    finally { annotationSyncRunning = false; }
+}
+async function removeAnnotation(id: string): Promise<void> { if (!pageContext) return; const url = pageContext.url; try { const next = await draftRequest({ type: 'annotations:remove', url, id }); if (pageContext?.url === url) { pageAnnotations = next; annotationError = ''; render(); } } catch (cause) { annotationError = `未保存：${errorMessage(cause)}`; render(); } }
+async function clearAnnotations(): Promise<void> { for (const a of [...pageAnnotations]) await removeAnnotation(a.id); }
 
 async function resetSession(): Promise<void> {
     clearConversationState();
@@ -739,6 +889,7 @@ function closeDirectoryBrowser(): void {
 }
 
 function clearConversationState(): void {
+    annotationPreview = null; approvedPreview = null;
     conversationRevision += 1;
     busy = false;
     sendPhase = '';

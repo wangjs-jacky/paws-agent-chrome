@@ -5,6 +5,10 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const extensionFiles = [
+    'THIRD_PARTY_NOTICES',
+    'annotation-popup.css',
+    'background.js',
+    'background.js.map',
     'content.js',
     'content.js.map',
     'manifest.json',

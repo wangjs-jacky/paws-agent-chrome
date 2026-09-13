@@ -1,5 +1,31 @@
 # Paws Agent Chrome
 
+v0.0.7 增加 Agentation 页面批注、预览后批量提问、折叠设置与当前会话跳转。
+Agentation 3.0.2 使用 PolyForm Shield，完整声明见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)；项目 MIT 不替代第三方许可。
+
+维护者于 2026-09-13 确认已取得本集成的公开发布授权；这不意味着下游使用者自动获得第三方许可之外的授权。
+
+本地验证与合成夹具启动：
+
+快速本地迭代用 `pnpm verify:fast`：类型检查、双进程单测、构建，不运行 Playwright 或 Ego。
+原有 `pnpm verify`、GitHub CI/Release 浏览器检查保持不变；快速检查不代表浏览器验收已通过。
+
+```bash
+pnpm install --frozen-lockfile
+pnpm test
+pnpm typecheck
+pnpm build
+node scripts/startAnnotationFixture.mjs
+```
+
+用 Ego 打开输出的本机地址。夹具预置假账号，通过本地 SDK 加密请求返回合成回复；其 runtime/storage 是模拟协议，不代表安装后的 MV3，也不使用生产凭据。
+
+点击左下角「开启批注」，在段落内选择文字（支持行内格式）或点击元素，在真实 Agentation 弹窗中填写问题。「编辑 / 删除」及编号标记可修改草稿，Esc 退出模式。在右下角面板点击「发送」先预览完整内容与设备、目录、会话，再「确认发送」。批注本身也可以独立发送。预览冻结内容；发送期间新增或编辑的草稿不会被旧批次清除。结果未知时保留草稿，先查看会话再自行决定重试，不自动重发；已接收但读取历史失败会明确标记「消息已发送」。
+
+设置默认收起，目标摘要、连接状态、新会话及会话链接始终可见。草稿按标签页生命周期和完整 URL 隔离，刷新恢复，同标签页 SPA 路由切换分别保存；不保证浏览器重启恢复。面板支持清空当前页。批量提示词默认省略 URL query/hash，勾选完整链接才发送。上限为每页 20 条、问题 2,000 字符、引用 6,000 字符、邻文合计 2,000 字符、提示词 40,000 字符；截断会标记，问题/整批超限会阻止发送。
+
+只使用公开 AnnotationPopupCSS 与 getElementPath；构建时提取原版弹窗 CSS 至 Shadow DOM，不嵌入写网站 localStorage 的完整工具条，不修改 node_modules 或组件逻辑。上游导入仍安装定时器包装；真实 MV3 隔离世界与网站 JS 分离，合成夹具则共用页面世界，未启用冻结。可见 UI 不是对网站保密的容器。跨段落选择、跨域 iframe、浏览器内部页/PDF、任意 Shadow DOM、未渲染的虚拟列表不在第一版支持范围。定位验证引用与上下文，回退最多检查 2,000 个文本节点；无法确认则提示原文位置变化，不猜测。真实浏览器覆盖见 `docs/evidence/agentation-local.md`。
+
 [English](README.md)
 
 这是一个 Manifest V3 浏览器扩展，会在 Chromium 网页右下角加入 Paws Agent 悬浮球。用户可以绑定现有 Paws 账号、选择在线机器和远端目录、携带当前网页上下文发起会话，并在原有 Paws 客户端中继续同步对话。
@@ -20,6 +46,11 @@ pnpm verify
 ```
 
 构建结果位于 `dist/`，可以通过 `chrome://extensions` 的“加载已解压的扩展程序”安装。
+
+目录选择区下方固定显示“当前会话”和“在 Paws 中打开 ↗”。会话 ID 过长时会
+省略显示，悬停可查看完整 ID；点击入口会在新标签页打开当前配置的 Paws Web
+对应会话，不替换原网页。会话尚未创建时显示“尚未创建”；新建会话或切换机器、
+目录后会清除旧链接。Paws Web 需要单独登录，扩展不会通过链接传递账号凭证。
 
 ## 安装 Release
 

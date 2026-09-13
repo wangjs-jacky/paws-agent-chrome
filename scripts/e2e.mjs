@@ -4,7 +4,7 @@ import { access, mkdir, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import { startE2eFixtureServer } from '../test/e2eFixtureServer.mjs';
 
 const exec = promisify(execFile);
@@ -47,19 +47,9 @@ try {
         deviceScaleFactor: 1,
         ...(recording ? { recordVideo: { dir: rawVideoDir, size: { width: 1280, height: 720 } } } : {}),
     });
-    await context.addInitScript(testOrigin => {
-        const prefix = 'paws-extension-e2e:';
-        const chromeApi = window.chrome ?? {};
-        chromeApi.runtime = { id: 'paws-agent-e2e', getURL: path => `${testOrigin}/${path}` };
-        chromeApi.storage = {
-            local: {
-                async get(key) { return { [key]: localStorage.getItem(prefix + key) }; },
-                async set(items) { for (const [key, value] of Object.entries(items)) localStorage.setItem(prefix + key, value); },
-                async remove(key) { localStorage.removeItem(prefix + key); },
-            },
-        };
-        if (!window.chrome) Object.defineProperty(window, 'chrome', { configurable: true, value: chromeApi });
-    }, fixture.origin);
+    // The fixture server injects fixtureRuntime.ts into the host and panel.
+    // Keep one runtime/storage owner; the legacy init script installed a
+    // read-only window.chrome that prevented this shared runtime from loading.
 
     page = await context.newPage();
     page.setDefaultTimeout(30_000);
@@ -86,6 +76,7 @@ try {
 
     stage('connect SDK and select remote target');
     await bubble.getByText('已连接').waitFor({ timeout: 15_000 });
+    await bubble.getByRole('button', { name: '设置', exact: true }).click();
     const machineOptions = await bubble.getByLabel('远端机器').locator('option').allTextContents();
     assert.deepEqual(machineOptions.slice(0, 2), [
         'E2E Mac mini · 在线',
@@ -193,6 +184,7 @@ try {
     await reloadedBubble.getByRole('button', { name: '打开 Paws Agent' }).click();
     await waitForExpandedFrame(page);
     await reloadedBubble.getByText('已连接').waitFor({ timeout: 15_000 });
+    await reloadedBubble.getByRole('button', { name: '设置', exact: true }).click();
     assert.equal(await reloadedBubble.getByText('把这个浏览器连接到 Paws').count(), 0, 'stored credentials must survive reload');
     assert.equal(await reloadedBubble.getByLabel('远端机器').inputValue(), 'paws-studio-machine');
     await expectInputValue(reloadedBubble.getByLabel('远端工作目录'), '/Users/studio/recent-art');
@@ -270,7 +262,9 @@ function stage(label) {
 
 async function expectInputValue(locator, expected) {
     await locator.waitFor();
-    assert.equal(await locator.inputValue(), expected);
+    // Directory changes await persistence before rendering; the fixture's
+    // shared storage is asynchronous, just like extension storage.
+    await expect(locator).toHaveValue(expected, { timeout: 10_000 });
 }
 
 async function waitForCondition(label, predicate) {
