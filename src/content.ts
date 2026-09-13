@@ -1,10 +1,12 @@
 import { mountAnnotationOverlay } from './annotationOverlay';
+import { enableDevelopmentReload } from './devReload';
 const FRAME_ID = 'paws-agent-bubble-frame';
 const COLLAPSED_SIZE = 76;
 const EXPANDED_WIDTH = 390;
 const EXPANDED_HEIGHT = 640;
 
 if (window === window.top && !document.getElementById(FRAME_ID)) {
+    enableDevelopmentReload();
     const frame = document.createElement('iframe');
     frame.id = FRAME_ID;
     frame.dataset.pawsAgentBubble = 'true';

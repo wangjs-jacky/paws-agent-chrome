@@ -6,7 +6,8 @@
   "permissions": ["storage"],
   "background": { "service_worker": "background.js" },
   "host_permissions": [
-    "https://47.115.228.20:8443/*"
+    "https://47.115.228.20:8443/*",
+    "https://happy-attachments-jacky.oss-cn-hangzhou.aliyuncs.com/*"
   ],
   "content_scripts": [
     {

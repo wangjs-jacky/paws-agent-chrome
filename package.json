@@ -1,6 +1,6 @@
 {
   "name": "@wangjs-jacky/paws-agent-chrome",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "private": true,
   "description": "Paws Agent floating conversation bubble for Chromium browsers",
   "license": "MIT",
@@ -15,6 +15,7 @@
     "preview:publish": "node scripts/fastPreview.mjs",
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
     "package:release": "pnpm run build && node scripts/packageRelease.mjs",
     "test": "vitest run",
     "test:smoke": "node scripts/smoke.mjs",
@@ -30,11 +31,13 @@
     "verify:fast": "pnpm run typecheck && pnpm exec vitest run --maxWorkers=2 && pnpm run build"
   },
   "dependencies": {
+    "@streamdown/mermaid": "1.0.2",
     "@wangjs-jacky/paws-agent": "0.1.0-beta.2",
     "agentation": "3.0.2",
     "qrcode": "^1.5.4",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "streamdown": "2.6.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

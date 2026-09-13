@@ -11,6 +11,9 @@ import {
     startBrowserAccountLink,
 } from '@wangjs-jacky/paws-agent/browser';
 import QRCode from 'qrcode';
+import { conversationBlocks, shouldFollowOutput } from './messagePresentation';
+import { markdownRenderer } from './messageRenderer';
+import { readDraftImage, type DraftImage } from './imageInput';
 import { createChromeStorage } from './chromeStorage';
 import { composePrompt, type PageContext } from './pageContext';
 import { DEFAULT_SERVER_URL, normalizeServerUrl } from './serverUrl';
@@ -64,6 +67,28 @@ let messages: Message[] = [];
 let requests: AgentRequest[] = [];
 let pageContext: PageContext | null = null;
 let draft = '';
+let draftImages: DraftImage[] = [];
+let readingImages = false;
+let pendingImageSend: AbortController | null = null;
+
+async function addImages(files: File[]): Promise<void> {
+    if (busy || readingImages || !files.length) return;
+    if (draftImages.length + files.length > 4) { errorText = '每条消息最多添加 4 张图片'; render(); return; }
+    readingImages = true;
+    const revision = conversationRevision;
+    annotationPreview = null;
+    approvedPreview = null;
+    render();
+    try {
+        for (const file of files) {
+            const image = await readDraftImage(file);
+            if (revision !== conversationRevision) { URL.revokeObjectURL(image.previewUrl); break; }
+            draftImages.push(image);
+        }
+        errorText = '';
+    } catch (cause) { errorText = errorMessage(cause); }
+    finally { readingImages = false; render(); }
+}
 let includeContext = true;
 let qrDataUrl = '';
 let linkUrl = '';
@@ -99,6 +124,7 @@ window.addEventListener('message', event => {
     }
     if (message?.type !== 'paws:page-context' || !isPageContext(message.context)) return;
     if (pageContext?.url !== message.context.url) {
+        pendingImageSend?.abort();
         conversationRevision += 1; busy = false; sendPhase = ''; pendingDirectoryApproval = false;
         annotationPreview = null; approvedPreview = null; pageAnnotations = [];
     }
@@ -108,6 +134,7 @@ window.addEventListener('message', event => {
 });
 
 function suspendPageResources(): void {
+    pendingImageSend?.abort();
     if (pageResourcesSuspended) return;
     pageResourcesSuspended = true;
     conversationRevision += 1;
@@ -167,8 +194,17 @@ async function initialize(): Promise<void> {
     if (phase === 'connecting') await connectClient();
 }
 
+let messageDisposers: Array<() => void> = [];
 function render(): void {
+    const oldList = root.querySelector<HTMLElement>('.message-list');
+    const sameSession = oldList?.dataset.sessionId === config.sessionId;
+    const follow = !oldList || !sameSession || shouldFollowOutput(oldList.scrollTop, oldList.clientHeight, oldList.scrollHeight);
+    const position = oldList?.scrollTop ?? 0;
+    for (const dispose of messageDisposers) dispose();
+    messageDisposers = [];
     root.replaceChildren(expanded ? renderPanel() : renderBubble());
+    const list = root.querySelector<HTMLElement>('.message-list');
+    if (list) list.scrollTop = follow ? list.scrollHeight : position;
 }
 
 function renderBubble(): HTMLElement {
@@ -451,19 +487,30 @@ function renderDirectoryBrowser(): HTMLElement {
 
 function renderMessages(): HTMLElement {
     const list = element('section', 'message-list');
+    list.dataset.sessionId = config.sessionId;
     list.setAttribute('aria-label', '会话消息');
     if (messages.length === 0) {
         const empty = element('div', 'empty-state');
         empty.append(element('strong', '', '从当前网页开始一条远端会话'), element('p', '', pageContext?.selection ? '已捕获选中内容，发送时可以一并带给 Agent。' : '你可以直接提问，也可以先在网页中选中一段内容。'));
         list.append(empty);
     } else {
-        for (const message of messages) {
-            const item = element('article', 'message');
-            item.append(element('p', '', messageText(message.content)));
-            list.append(item);
+        for (const block of conversationBlocks(messages)) {
+            for (const part of block.parts) {
+                    const item = element('article', part.kind === 'status' ? 'message-status' : part.user ? 'message message-user' : 'message');
+                    if (part.kind === 'text') {
+                        messageDisposers.push(markdownRenderer.mount(item, part.text));
+                    } else item.append(element('p', '', part.text));
+                    list.append(item);
+            }
+            if (block.activities.length) {
+                const detail = document.createElement('details');
+                detail.className = 'message message-activity';
+                detail.append(element('summary', '', `执行过程 · ${block.activities.length} 条`));
+                for (const text of block.activities) detail.append(element('p', '', text));
+                list.append(detail);
+            }
         }
     }
-    queueMicrotask(() => { list.scrollTop = list.scrollHeight; });
     return list;
 }
 
@@ -487,13 +534,13 @@ function renderComposer(): HTMLElement {
     const textarea = document.createElement('textarea');
     const send = primaryButton(busy ? sendPhase || '发送中…' : '发送', () => undefined);
     send.type = 'submit';
-    send.disabled = busy || (!draft.trim() && !pageAnnotations.length);
+    send.disabled = busy || readingImages || (!draft.trim() && !pageAnnotations.length && !draftImages.length);
     textarea.placeholder = '告诉远端 Agent 你想做什么…';
     textarea.value = draft;
     textarea.rows = 3;
     textarea.addEventListener('input', () => {
         draft = textarea.value;
-        send.disabled = busy || (!draft.trim() && !pageAnnotations.length);
+        send.disabled = busy || readingImages || (!draft.trim() && !pageAnnotations.length && !draftImages.length);
     });
     textarea.addEventListener('keydown', event => {
         if (event.key === 'Enter' && !event.shiftKey) {
@@ -502,21 +549,44 @@ function renderComposer(): HTMLElement {
         }
     });
     const footer = element('div', 'composer-footer');
+    const picker = document.createElement('input');
+    picker.type = 'file'; picker.accept = 'image/png,image/jpeg,image/webp'; picker.multiple = true; picker.hidden = true;
+    picker.setAttribute('aria-label', '选择图片');
+    picker.addEventListener('change', () => { void addImages(Array.from(picker.files ?? [])); picker.value = ''; });
+    const attach = secondaryButton(readingImages ? '读取图片…' : '添加图片', () => picker.click());
+    attach.disabled = busy || readingImages;
+    textarea.addEventListener('paste', event => {
+        const files = Array.from(event.clipboardData?.files ?? []).filter(file => file.type.startsWith('image/'));
+        if (files.length) { event.preventDefault(); void addImages(files); }
+    });
+    form.addEventListener('dragover', event => { event.preventDefault(); });
+    form.addEventListener('drop', event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer?.files ?? [])); });
+    const previews = element('div', 'image-drafts');
+    for (const image of draftImages) {
+        const card = element('div', 'image-draft');
+        const thumb = document.createElement('img'); thumb.src = image.previewUrl; thumb.alt = image.name;
+        const remove = secondaryButton('移除图片', () => {
+            draftImages = draftImages.filter(item => item.id !== image.id); URL.revokeObjectURL(image.previewUrl);
+            annotationPreview = null; approvedPreview = null; render();
+        });
+        remove.disabled = busy;
+        card.append(thumb, remove); previews.append(card);
+    }
     const contextLabel = element('label', 'context-toggle');
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = includeContext;
     checkbox.addEventListener('change', () => { includeContext = checkbox.checked; });
     contextLabel.append(checkbox, element('span', '', pageContext?.selection ? '带上选中内容' : '带上当前网页'));
-    footer.append(contextLabel, send);
+    footer.append(attach, contextLabel, send);
     if (pageAnnotations.length) {
         const full = element('label', 'context-toggle'); const check = document.createElement('input'); check.type = 'checkbox'; check.checked = includeFullUrl;
         check.addEventListener('change', () => { includeFullUrl = check.checked; annotationPreview = null; });
         full.append(check, element('span', '', '包含完整链接（query/hash）')); form.append(full);
     }
-    form.append(textarea, footer);
+    form.append(previews, picker, textarea, footer);
     form.addEventListener('submit', event => {
-        event.preventDefault(); if (busy) return;
+        event.preventDefault(); if (busy || readingImages) return;
         if (pageAnnotations.length) {
             try { if (annotationError) throw new Error(annotationError); const batch = createAnnotationBatch(draft, pageAnnotations, includeFullUrl); annotationPreview = Object.freeze({ batch, target: `${machineDisplayName(selectedMachine()!)} · ${config.directory}`, machineId: config.machineId, directory: config.directory.trim(), sessionId: config.sessionId, revision: conversationRevision, originalDraft: draft, url: pageContext!.url }); errorText = ''; }
             catch (cause) { errorText = errorMessage(cause); }
@@ -613,7 +683,9 @@ async function connectClient(): Promise<void> {
                 render();
             }
             if (event.type === 'message' && event.sessionId === config.sessionId) {
-                if (!messages.some(item => item.id === event.message.id)) messages.push(event.message);
+                const index = messages.findIndex(item => item.id === event.message.id);
+                if (index < 0) messages.push(event.message);
+                else messages[index] = event.message;
                 render();
             }
             if (event.type === 'request' && event.sessionId === config.sessionId) {
@@ -681,7 +753,7 @@ async function connectClient(): Promise<void> {
 async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
     const preview = approvedPreview;
     if (preview && (preview.revision !== conversationRevision || preview.machineId !== config.machineId || preview.directory !== config.directory.trim() || preview.sessionId !== config.sessionId || preview.url !== pageContext?.url)) { approvedPreview = null; errorText = '发送目标或页面已变化，请重新预览。'; render(); return; }
-    if (!client || busy || (!draft.trim() && !preview) || !config.machineId || !config.directory.trim()) {
+    if (!client || busy || readingImages || (!draft.trim() && !preview && !draftImages.length) || !config.machineId || !config.directory.trim()) {
         if (!config.machineId) errorText = '没有可用的在线机器。';
         else if (!config.directory.trim()) errorText = '请先填写远端工作目录。';
         render();
@@ -696,7 +768,10 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
     const revision = conversationRevision;
     const isCurrent = () => revision === conversationRevision && client === requestClient;
     const originalDraft = preview?.originalDraft ?? draft;
-    const text = preview?.batch.prompt ?? composePrompt(originalDraft, pageContext, includeContext);
+    const images = [...draftImages];
+    const sendController = new AbortController();
+    pendingImageSend = sendController;
+    const text = preview?.batch.prompt ?? composePrompt(originalDraft || (images.length ? '请查看所附图片。' : ''), pageContext, includeContext);
     const meta = preview ? { source: 'paws-agent-chrome', annotationBatchId: preview.batch.id } : pageContext ? { source: 'paws-agent-chrome', pageUrl: pageContext.url } : { source: 'paws-agent-chrome' };
     const machineId = config.machineId;
     const directory = config.directory.trim();
@@ -729,16 +804,20 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
             await saveConfig();
             if (!isCurrent()) return;
         }
-        sendPhase = '正在发送消息…';
+        sendPhase = images.length ? '正在上传图片并发送…' : '正在发送消息…';
         render();
         await Promise.race([requestClient.messages.send({
             sessionId,
             text,
+            images,
+            signal: sendController.signal,
             meta,
-        }), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('发送结果待确认：等待超过 45 秒，请先查看会话再决定是否重试。')), 45000); })]);
+        }), new Promise<never>((_, reject) => { timer = setTimeout(() => { sendController.abort(); reject(new Error('发送结果待确认：等待超过 45 秒，请先查看会话再决定是否重试。')); }, 45000); })]);
         accepted = true;
         clearTimeout(timer);
         if (!isCurrent()) return;
+        for (const image of images) URL.revokeObjectURL(image.previewUrl);
+        draftImages = draftImages.filter(image => !images.some(sent => sent.id === image.id));
         approvedPreview = null;
         if (preview) {
             try {
@@ -765,7 +844,7 @@ async function sendDraft(approvedNewDirectoryCreation: boolean): Promise<void> {
         busy = false;
         sendPhase = '';
         approvedPreview = null;
-        errorText = accepted ? `消息已发送，但读取历史失败：${errorMessage(cause)}。请在 Paws 中查看会话。` : `发送结果待确认：${errorMessage(cause)}。草稿已保留，请先查看会话再决定是否重试。`;
+        errorText = accepted ? `消息已发送，但读取历史失败：${errorMessage(cause)}。请在 Paws 中查看会话。` : !sessionId ? `创建会话失败：${errorMessage(cause)}。草稿已保留。` : `发送结果待确认：${errorMessage(cause)}。草稿已保留，请先查看会话再决定是否重试。`;
         render();
     } finally {
         clearTimeout(timer);
@@ -784,7 +863,7 @@ async function syncAnnotations(): Promise<void> {
         if (recovered) annotationError = '';
         if (changed || recovered) render();
     }
-    catch (cause) { if (pageContext?.url === url) { annotationError = `无法读取批注草稿：${errorMessage(cause)}`; render(); } }
+    catch (cause) { if (pageContext?.url === url) { const nextError = `无法读取批注草稿：${errorMessage(cause)}`; if (annotationError !== nextError) { annotationError = nextError; render(); } } }
     finally { annotationSyncRunning = false; }
 }
 async function removeAnnotation(id: string): Promise<void> { if (!pageContext) return; const url = pageContext.url; try { const next = await draftRequest({ type: 'annotations:remove', url, id }); if (pageContext?.url === url) { pageAnnotations = next; annotationError = ''; render(); } } catch (cause) { annotationError = `未保存：${errorMessage(cause)}`; render(); } }
@@ -889,6 +968,7 @@ function closeDirectoryBrowser(): void {
 }
 
 function clearConversationState(): void {
+    pendingImageSend?.abort();
     annotationPreview = null; approvedPreview = null;
     conversationRevision += 1;
     busy = false;

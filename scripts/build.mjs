@@ -18,7 +18,10 @@ await build({
     format: 'iife',
     target: ['chrome120'],
     sourcemap: true,
-    define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+    define: {
+        'process.env.NODE_ENV': JSON.stringify('production'),
+        __PAWS_DEV_RELOAD_URL__: JSON.stringify(process.env.PAWS_EXTENSION_DEV_RELOAD_URL ?? ''),
+    },
     logLevel: 'info',
     plugins: [{ name: 'agentation-shadow-styles', setup(build) {
         build.onLoad({ filter: /agentation\/dist\/index\.mjs$/ }, async args => {

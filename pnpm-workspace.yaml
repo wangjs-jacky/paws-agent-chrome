@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@wangjs-jacky/paws-agent@0.1.0-beta.2': patches/@wangjs-jacky__paws-agent@0.1.0-beta.2.patch

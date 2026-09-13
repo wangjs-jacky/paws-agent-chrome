@@ -126,6 +126,23 @@ try {
     await expectInputValue(bubble.getByLabel('远端工作目录'), '/Users/e2e/Projects/paws-chrome');
 
     await bubble.getByPlaceholder('告诉远端 Agent 你想做什么…').fill(marker);
+    const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+    await bubble.getByLabel('选择图片').setInputFiles({ name: '截图.png', mimeType: 'image/png', buffer: imageBytes });
+    await bubble.locator('.image-draft img').waitFor();
+    await bubble.getByRole('button', { name: '移除图片' }).click();
+    await bubble.locator('textarea').evaluate((textarea, bytes) => {
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([new Uint8Array(bytes)], '粘贴截图.png', { type: 'image/png' }));
+        textarea.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
+    }, [...imageBytes]);
+    await bubble.locator('.image-draft img').waitFor();
+    await bubble.getByRole('button', { name: '移除图片' }).click();
+    await bubble.locator('.composer').evaluate((form, bytes) => {
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([new Uint8Array(bytes)], '拖拽截图.png', { type: 'image/png' }));
+        form.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    }, [...imageBytes]);
+    await bubble.locator('.image-draft img').waitFor();
     if (recording || headed) await page.waitForTimeout(900);
     await bubble.getByRole('button', { name: '发送', exact: true }).click();
     await bubble.getByText('远端目录不存在：/Users/e2e/Projects/paws-chrome').waitFor();
@@ -134,6 +151,33 @@ try {
 
     stage('verify remote reply and encrypted page context');
     await bubble.getByText('E2E fixture reply: remote session is ready.').waitFor({ timeout: 15_000 });
+    assert.deepEqual(fixture.state.imageBytes[0], imageBytes, '图片经 SDK 加密后能由接收端解密为原始字节');
+    assert.equal(await bubble.locator('.image-draft').count(), 0);
+    await bubble.locator('.markdown-body h2').filter({ hasText: '展示验收' }).waitFor();
+    await bubble.locator('.markdown-body strong').filter({ hasText: '加粗内容' }).waitFor();
+    await bubble.locator('.markdown-body li').filter({ hasText: '列表项目' }).waitFor();
+    await bubble.locator('.markdown-body td').filter({ hasText: 'Markdown' }).waitFor();
+    await bubble.locator('.markdown-body code').filter({ hasText: 'const answer = 42;' }).waitFor();
+    const diagram = bubble.getByAltText('流程图预览');
+    await diagram.waitFor({ timeout: 20_000 });
+    await expect(diagram).toHaveJSProperty('complete', true);
+    assert.equal(await diagram.evaluate(img => img.naturalWidth > 0 && img.getBoundingClientRect().height <= 181), true);
+    assert.equal(await bubble.locator('.markdown-body svg').count(), 0);
+    const popupPromise = context.waitForEvent('page');
+    await bubble.getByRole('link', { name: '打开流程图原图' }).click();
+    const diagramPage = await popupPromise;
+    await diagramPage.waitForLoadState();
+    assert.equal(diagramPage.url().startsWith('blob:'), true);
+    const fullImage = diagramPage.getByAltText('流程图原图');
+    await expect(fullImage).toHaveJSProperty('complete', true);
+    assert.equal(await fullImage.evaluate(img => img.src.startsWith('data:image/png;base64,') && img.naturalWidth > 0 && img.getBoundingClientRect().bottom <= innerHeight), true);
+    await diagramPage.getByText('原始尺寸', { exact: true }).click();
+    await expect(diagramPage.locator('#size')).toBeChecked();
+    await diagramPage.getByText('原始尺寸', { exact: true }).click();
+    await diagramPage.screenshot({ path: resolve(artifactDir, 'diagram-viewer.png') });
+    await diagramPage.close();
+    assert.equal(await bubble.locator('.markdown-body a[href^="javascript:"]').count(), 0);
+    assert.equal(await bubble.locator('body').evaluate(() => Boolean(window.pawsUnsafeExecuted)), false);
     await bubble.getByText(marker, { exact: false }).waitFor();
     await page.screenshot({ path: screenshotPath, fullPage: true });
     if (recording || headed) await page.waitForTimeout(1_100);

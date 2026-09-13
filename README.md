@@ -1,5 +1,11 @@
 # Paws Agent Chrome
 
+## v0.0.8
+
+Markdown rendering with Streamdown, grouped execution details and skill names, preserved history scroll, Mermaid PNG previews with a dedicated image viewer, and encrypted image input via file selection, paste and drop.
+
+Codex launches now obtain a fresh session grant. The pinned beta.2 SDK uses a checked-in pnpm patch for grants and image messages; these changes have not yet been migrated to the upstream Happy SDK source. The extension adds permission for its specific OSS attachment host. Replies remain complete-message updates, not token streaming. Unsent image drafts do not survive page refresh.
+
 Fast daily previews: stage approved files, then run `pnpm preview:publish --message "change description"`. Full CI runs asynchronously; stable release gates stay intact. See [fast preview workflow](docs/fast-preview.md). Add `--check` for local-only verification with no publication.
 
 Version 0.0.7 adds Agentation page annotations, previewed batch questions,
@@ -97,6 +103,22 @@ pnpm verify
 ```
 
 The unpacked extension is written to `dist/`.
+
+### Development mode
+
+Run `pnpm dev` once, then load this repository's `dist/` in `chrome://extensions`.
+It watches `src/`, `static/`, and `scripts/`, rebuilds after each save, and reloads
+both the extension and open ordinary pages. Keep a page open after loading the
+development `dist/` to receive subsequent save-triggered reloads. The development build adds permission
+for its local reload service, so it must never be packaged or released. After
+stopping it, run `pnpm build` and reload the extension from the extensions page to
+restore the production permission set.
+
+```bash
+pnpm dev
+# Optional, if the default local port is occupied
+PAWS_EXTENSION_DEV_PORT=37652 pnpm dev
+```
 
 The current-session row below the target picker shows the session ID (hover for
 the full ID) and **Open in Paws**. It opens the configured Paws Web session in a
