@@ -1,5 +1,7 @@
 # Paws Agent Chrome
 
+Fast daily previews: stage approved files, then run `pnpm preview:publish --message "change description"`. Full CI runs asynchronously; stable release gates stay intact. See [fast preview workflow](docs/fast-preview.md). Add `--check` for local-only verification with no publication.
+
 Version 0.0.7 adds Agentation page annotations, previewed batch questions,
 collapsed settings and current-session navigation. Agentation 3.0.2 uses
 PolyForm Shield; see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). The project's MIT

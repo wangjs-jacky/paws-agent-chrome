@@ -12,6 +12,7 @@
   },
   "type": "module",
   "scripts": {
+    "preview:publish": "node scripts/fastPreview.mjs",
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build.mjs",
     "package:release": "pnpm run build && node scripts/packageRelease.mjs",
