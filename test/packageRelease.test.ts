@@ -45,7 +45,7 @@ describe('release packager', () => {
         expect(manifestResult.status, manifestResult.stderr).toBe(0);
         const manifest = JSON.parse(manifestResult.stdout);
         expect(manifest.version).toBe('0.0.3');
-        expect(manifest.host_permissions).toEqual(['https://47.115.228.20:8443/*']);
+        expect(manifest.host_permissions).toEqual(['https://47.115.228.20:8443/*', 'https://happy-attachments-jacky.oss-cn-hangzhou.aliyuncs.com/*']);
     });
 
     test('accepts the package-manager argument separator', async () => {
@@ -162,6 +162,7 @@ async function createFixture(options: {
         optional_host_permissions: options.optionalHostPermissions,
         host_permissions: [
             'https://47.115.228.20:8443/*',
+            'https://happy-attachments-jacky.oss-cn-hangzhou.aliyuncs.com/*',
             ...(options.localhost ? ['http://localhost/*'] : []),
             ...(options.extraHostPermission ? [options.extraHostPermission] : []),
         ],

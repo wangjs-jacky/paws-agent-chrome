@@ -1,0 +1,196 @@
+diff --git a/dist/PawsAgentClient-BIIRgchV.mjs b/dist/PawsAgentClient-BIIRgchV.mjs
+index 8a004e98b0596d5bfb8795585ec54f19e86c62fd..e01b92950e4668e3603b476acc776827a4d4b5e3 100644
+--- a/dist/PawsAgentClient-BIIRgchV.mjs
++++ b/dist/PawsAgentClient-BIIRgchV.mjs
+@@ -338,6 +338,47 @@ class MessagesResourceImpl {
+       });
+     }
+     const recordEncryption = await this.getEncryption(input.sessionId);
++    const images = input.images ?? [];
++    if (!Array.isArray(images) || images.length > 4 || images.some(image => !(image.bytes instanceof Uint8Array) || image.bytes.length === 0 || image.bytes.length > 10 * 1024 * 1024 || !["image/png", "image/jpeg", "image/webp"].includes(image.mimeType))) {
++      throw new Error("图片最多 4 张，每张不超过 10 MB，仅支持 PNG、JPEG、WebP");
++    }
++    const attachments = [];
++    for (const image of images) {
++      const key = deriveKey(recordEncryption.key, "Happy Blobs", [recordEncryption.variant === "legacy" ? "master" : "session"]);
++      const nonce = getRandomBytes(24);
++      const cipher = tweetnacl.secretbox(image.bytes, nonce, key);
++      const encrypted = new Uint8Array(nonce.length + cipher.length);
++      encrypted.set(nonce); encrypted.set(cipher, nonce.length);
++      const upload = await this.transport.post(`/v1/sessions/${encodeURIComponent(input.sessionId)}/attachments/request-upload`, { filename: image.name, size: encrypted.length });
++      const server = new URL(this.transport.url("/"));
++      const target = new URL(upload.uploadUrl);
++      if (["localhost", "127.0.0.1", "[::1]"].includes(target.hostname)) { target.protocol = server.protocol; target.host = server.host; }
++      if (target.protocol !== "https:" && !(target.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname))) throw new Error("图片上传地址必须使用 HTTPS");
++      if (typeof upload.ref !== "string" || !["PUT", "POST"].includes(upload.method)) throw new Error("图片上传响应无效");
++      let body;
++      const headers = {};
++      if (upload.method === "POST") {
++        body = new FormData();
++        for (const [key, value] of Object.entries(upload.formFields ?? {})) body.append(key, String(value));
++        body.append("file", new Blob([encrypted], { type: "application/octet-stream" }), "blob");
++      } else {
++        body = encrypted;
++        headers["Content-Type"] = "application/octet-stream";
++        if (target.origin === server.origin) headers.Authorization = `Bearer ${(await this.transport.getCredentials()).token}`;
++      }
++      const timeout = AbortSignal.timeout(15000);
++      const response = await fetch(target, { method: upload.method, headers, body, redirect: "error", signal: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout });
++      if (!response.ok) throw new Error(`图片上传失败（${response.status}），图片已保留`);
++      attachments.push({
++        localId: globalThis.crypto.randomUUID(),
++        content: encodeBase64(encrypt(recordEncryption.key, recordEncryption.variant, {
++          role: "session", content: { type: "session", data: { id: globalThis.crypto.randomUUID(), time: Date.now(), role: "user",
++            ev: { t: "file", ref: upload.ref, name: image.name, size: image.bytes.length, image: { width: image.width, height: image.height } }
++          } }
++        }))
++      });
++    }
++    input.signal?.throwIfAborted();
+     const localId = input.localId ?? globalThis.crypto.randomUUID();
+     const content = {
+       role: "user",
+@@ -347,7 +388,7 @@ class MessagesResourceImpl {
+     await this.transport.post(
+       `/v3/sessions/${encodeURIComponent(input.sessionId)}/messages`,
+       {
+-        messages: [{
++        messages: [...attachments, {
+           localId,
+           content: encodeBase64(encrypt(recordEncryption.key, recordEncryption.variant, content))
+         }]
+@@ -442,12 +483,22 @@ class SessionsResourceImpl {
+     this.requireId(input.machineId, "machineId");
+     this.requireId(input.directory, "directory");
+     await this.ensureMachine(input.machineId);
++    // 每次实际启动申请全新授权，不缓存也不重试一次性凭证。
++    let codexSessionGrant;
++    if (input.agent === "codex") {
++      const authorization = await this.transport.post("/v1/codex-session-grants", { machineId: input.machineId });
++      if (!authorization || typeof authorization.grant !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(authorization.grant)) {
++        throw new Error("Codex 启动授权响应无效，请检查服务端版本");
++      }
++      codexSessionGrant = authorization.grant;
++    }
+     const result = await this.realtime.machineRpc(input.machineId, "spawn-happy-session", {
+       type: "spawn-in-directory",
+       directory: input.directory,
+       approvedNewDirectoryCreation: input.approvedNewDirectoryCreation ?? false,
+       token: input.providerToken,
+-      agent: input.agent
++      agent: input.agent,
++      ...(codexSessionGrant ? { codexSessionGrant } : {})
+     });
+     return this.parseSpawnResult(result);
+   }
+diff --git a/dist/PawsAgentClient-CC_ADPsA.cjs b/dist/PawsAgentClient-CC_ADPsA.cjs
+index d1511435827d7332837b008642c5ba6a7f55ab93..42e42437c12894776dbf466c61cc9f75f13ec698 100644
+--- a/dist/PawsAgentClient-CC_ADPsA.cjs
++++ b/dist/PawsAgentClient-CC_ADPsA.cjs
+@@ -340,6 +340,47 @@ class MessagesResourceImpl {
+       });
+     }
+     const recordEncryption = await this.getEncryption(input.sessionId);
++    const images = input.images ?? [];
++    if (!Array.isArray(images) || images.length > 4 || images.some(image => !(image.bytes instanceof Uint8Array) || image.bytes.length === 0 || image.bytes.length > 10 * 1024 * 1024 || !["image/png", "image/jpeg", "image/webp"].includes(image.mimeType))) {
++      throw new Error("图片最多 4 张，每张不超过 10 MB，仅支持 PNG、JPEG、WebP");
++    }
++    const attachments = [];
++    for (const image of images) {
++      const key = deriveKey(recordEncryption.key, "Happy Blobs", [recordEncryption.variant === "legacy" ? "master" : "session"]);
++      const nonce = getRandomBytes(24);
++      const cipher = tweetnacl.secretbox(image.bytes, nonce, key);
++      const encrypted = new Uint8Array(nonce.length + cipher.length);
++      encrypted.set(nonce); encrypted.set(cipher, nonce.length);
++      const upload = await this.transport.post(`/v1/sessions/${encodeURIComponent(input.sessionId)}/attachments/request-upload`, { filename: image.name, size: encrypted.length });
++      const server = new URL(this.transport.url("/"));
++      const target = new URL(upload.uploadUrl);
++      if (["localhost", "127.0.0.1", "[::1]"].includes(target.hostname)) { target.protocol = server.protocol; target.host = server.host; }
++      if (target.protocol !== "https:" && !(target.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname))) throw new Error("图片上传地址必须使用 HTTPS");
++      if (typeof upload.ref !== "string" || !["PUT", "POST"].includes(upload.method)) throw new Error("图片上传响应无效");
++      let body;
++      const headers = {};
++      if (upload.method === "POST") {
++        body = new FormData();
++        for (const [key, value] of Object.entries(upload.formFields ?? {})) body.append(key, String(value));
++        body.append("file", new Blob([encrypted], { type: "application/octet-stream" }), "blob");
++      } else {
++        body = encrypted;
++        headers["Content-Type"] = "application/octet-stream";
++        if (target.origin === server.origin) headers.Authorization = `Bearer ${(await this.transport.getCredentials()).token}`;
++      }
++      const timeout = AbortSignal.timeout(15000);
++      const response = await fetch(target, { method: upload.method, headers, body, redirect: "error", signal: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout });
++      if (!response.ok) throw new Error(`图片上传失败（${response.status}），图片已保留`);
++      attachments.push({
++        localId: globalThis.crypto.randomUUID(),
++        content: encodeBase64(encrypt(recordEncryption.key, recordEncryption.variant, {
++          role: "session", content: { type: "session", data: { id: globalThis.crypto.randomUUID(), time: Date.now(), role: "user",
++            ev: { t: "file", ref: upload.ref, name: image.name, size: image.bytes.length, image: { width: image.width, height: image.height } }
++          } }
++        }))
++      });
++    }
++    input.signal?.throwIfAborted();
+     const localId = input.localId ?? globalThis.crypto.randomUUID();
+     const content = {
+       role: "user",
+@@ -349,7 +390,7 @@ class MessagesResourceImpl {
+     await this.transport.post(
+       `/v3/sessions/${encodeURIComponent(input.sessionId)}/messages`,
+       {
+-        messages: [{
++        messages: [...attachments, {
+           localId,
+           content: encodeBase64(encrypt(recordEncryption.key, recordEncryption.variant, content))
+         }]
+@@ -444,12 +485,22 @@ class SessionsResourceImpl {
+     this.requireId(input.machineId, "machineId");
+     this.requireId(input.directory, "directory");
+     await this.ensureMachine(input.machineId);
++    // 每次实际启动申请全新授权，不缓存也不重试一次性凭证。
++    let codexSessionGrant;
++    if (input.agent === "codex") {
++      const authorization = await this.transport.post("/v1/codex-session-grants", { machineId: input.machineId });
++      if (!authorization || typeof authorization.grant !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(authorization.grant)) {
++        throw new Error("Codex 启动授权响应无效，请检查服务端版本");
++      }
++      codexSessionGrant = authorization.grant;
++    }
+     const result = await this.realtime.machineRpc(input.machineId, "spawn-happy-session", {
+       type: "spawn-in-directory",
+       directory: input.directory,
+       approvedNewDirectoryCreation: input.approvedNewDirectoryCreation ?? false,
+       token: input.providerToken,
+-      agent: input.agent
++      agent: input.agent,
++      ...(codexSessionGrant ? { codexSessionGrant } : {})
+     });
+     return this.parseSpawnResult(result);
+   }
+diff --git a/dist/index.d.cts b/dist/index.d.cts
+index 0fce54f4284f94ce17ae2765a9409ec65c99c913..593a9dc4f4528113e3ac16534e81d8a11a401f1e 100644
+--- a/dist/index.d.cts
++++ b/dist/index.d.cts
+@@ -118,6 +118,8 @@ type ResumeSessionInput = {
+     sessionId: string;
+ };
+ type SendMessageInput = {
++    signal?: AbortSignal;
++    images?: Array<{ name: string; mimeType: string; bytes: Uint8Array; width: number; height: number }>;
+     sessionId: string;
+     text: string;
+     localId?: string;
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index 0fce54f4284f94ce17ae2765a9409ec65c99c913..593a9dc4f4528113e3ac16534e81d8a11a401f1e 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -118,6 +118,8 @@ type ResumeSessionInput = {
+     sessionId: string;
+ };
+ type SendMessageInput = {
++    signal?: AbortSignal;
++    images?: Array<{ name: string; mimeType: string; bytes: Uint8Array; width: number; height: number }>;
+     sessionId: string;
+     text: string;
+     localId?: string;

@@ -66,7 +66,7 @@ async function packageRelease({ packageDir, outputDir, tag }) {
     if (hostPermissions.some(permission => permission.startsWith('http://47.115.228.20:'))) {
         throw new Error('Production extension must not allow the legacy plaintext service origin');
     }
-    if (!containsExactly(hostPermissions, ['https://47.115.228.20:8443/*'])) {
+    if (!containsExactly(hostPermissions, ['https://47.115.228.20:8443/*', 'https://happy-attachments-jacky.oss-cn-hangzhou.aliyuncs.com/*'])) {
         throw new Error(`Production extension has unexpected host permissions: ${hostPermissions.join(', ') || 'none'}`);
     }
     const permissions = Array.isArray(manifest.permissions) ? manifest.permissions : [];

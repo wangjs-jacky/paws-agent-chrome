@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { createHmac } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { Server as SocketServer } from 'socket.io';
@@ -33,6 +34,7 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
         extraRecentUpdatedAt: 0,
         failNextSend: false,
         failStorage: false,
+        imageBytes: [],
     };
     const messages = [];
     let linkPublicKey = null;
@@ -100,6 +102,24 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
             }
 
             requireAuthorization(request);
+            if (url.pathname.endsWith('/attachments/request-upload')) {
+                await readJson(request);
+                sendJson(response, { ref: 'fixture-image', method: 'PUT', uploadUrl: `${url.origin}/fixture-image-upload` }); return;
+            }
+            if (url.pathname === '/fixture-image-upload' && request.method === 'PUT') {
+                const chunks = []; for await (const chunk of request) chunks.push(chunk);
+                const bytes = Buffer.concat(chunks);
+                const root = createHmac('sha512', 'Happy Blobs Master Seed').update(secret).digest();
+                const key = createHmac('sha512', root.subarray(32)).update(Buffer.concat([Buffer.from([0]), Buffer.from('master')])).digest().subarray(0, 32);
+                const plain = tweetnacl.secretbox.open(bytes.subarray(24), bytes.subarray(0, 24), key);
+                if (!plain) throw new Error('image decryption failed');
+                state.imageBytes.push(Buffer.from(plain));
+                sendJson(response, { success: true }); return;
+            }
+            if (url.pathname === '/v1/codex-session-grants' && request.method === 'POST') {
+                sendJson(response, { grant: 'g'.repeat(43), expiresAt: Date.now() + 60_000 });
+                return;
+            }
             if (url.pathname === '/v1/machines' && request.method === 'GET') {
                 sendJson(response, machineRecords(secret, state));
                 return;
@@ -120,7 +140,12 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
             if (url.pathname === `/v3/sessions/${SESSION_ID}/messages` && request.method === 'POST') {
                 if (state.failNextSend) { state.failNextSend = false; sendJson(response, 503, { error: 'Synthetic send failure' }); return; }
                 const body = await readJson(request);
-                const item = body.messages?.[0];
+                const item = body.messages?.at(-1);
+                for (const file of (body.messages ?? []).slice(0, -1)) {
+                    const content = decryptLegacy(fromBase64(file.content), secret);
+                    if (content?.content?.data?.ev?.t !== 'file' || content.content.data.ev.ref !== 'fixture-image' || !state.imageBytes.length) throw new Error('attachment protocol invalid');
+                    messages.push(rawMessage(`file-${messages.length + 1}`, messages.length + 1, file.localId, content, secret, Date.now()));
+                }
                 if (typeof item?.content !== 'string' || typeof item?.localId !== 'string') {
                     throw new Error('message payload is malformed');
                 }
@@ -132,7 +157,7 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
                 messages.push(rawMessage(`user-${messages.length + 1}`, messages.length + 1, item.localId, plainContent, secret, now));
                 messages.push(rawMessage(`agent-${messages.length + 1}`, messages.length + 1, null, {
                     role: 'agent',
-                    content: { type: 'text', text: 'E2E fixture reply: remote session is ready.' },
+                    content: { type: 'text', text: 'E2E fixture reply: remote session is ready.\n\n## 展示验收\n\n**加粗内容**\n\n- 列表项目\n\n| 名称 | 状态 |\n| --- | --- |\n| Markdown | 正常 |\n\n```js\nconst answer = 42;\n```\n\n```mermaid\ngraph TD\nA[给出真实目标] --> B{任务复杂度}\nB -->|简单问答| C[快速回答]\nB -->|多步骤任务| D[分析需求与代码资料]\nD --> E[实施或调研]\nE --> F[运行测试或浏览器验证]\nF --> G{通过验收}\nG -->|否| H[定位问题并继续修复]\nH --> E\nG -->|是| I[交付结果与验证证据]\n```\n\n[危险链接](javascript:alert(1))\n\n<script>window.pawsUnsafeExecuted = true</script>' },
                 }, secret, now + 1));
                 sendJson(response, { success: true });
                 return;
@@ -181,6 +206,10 @@ export async function startE2eFixtureServer(extensionDir, { injectContentScript 
                     return;
                 }
                 state.spawnRequests += 1;
+                if (params?.agent === 'codex' && params.codexSessionGrant !== 'g'.repeat(43)) {
+                    acknowledge({ ok: false, error: 'Missing Codex session grant' });
+                    return;
+                }
                 if (params?.approvedNewDirectoryCreation !== true) {
                     acknowledge({
                         ok: true,
