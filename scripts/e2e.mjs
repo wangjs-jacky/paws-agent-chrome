@@ -47,19 +47,9 @@ try {
         deviceScaleFactor: 1,
         ...(recording ? { recordVideo: { dir: rawVideoDir, size: { width: 1280, height: 720 } } } : {}),
     });
-    await context.addInitScript(testOrigin => {
-        const prefix = 'paws-extension-e2e:';
-        const chromeApi = window.chrome ?? {};
-        chromeApi.runtime = { id: 'paws-agent-e2e', getURL: path => `${testOrigin}/${path}` };
-        chromeApi.storage = {
-            local: {
-                async get(key) { return { [key]: localStorage.getItem(prefix + key) }; },
-                async set(items) { for (const [key, value] of Object.entries(items)) localStorage.setItem(prefix + key, value); },
-                async remove(key) { localStorage.removeItem(prefix + key); },
-            },
-        };
-        if (!window.chrome) Object.defineProperty(window, 'chrome', { configurable: true, value: chromeApi });
-    }, fixture.origin);
+    // The fixture server injects fixtureRuntime.ts into the host and panel.
+    // Keep one runtime/storage owner; the legacy init script installed a
+    // read-only window.chrome that prevented this shared runtime from loading.
 
     page = await context.newPage();
     page.setDefaultTimeout(30_000);
