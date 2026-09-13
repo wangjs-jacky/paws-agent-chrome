@@ -4,7 +4,7 @@ import { access, mkdir, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import { startE2eFixtureServer } from '../test/e2eFixtureServer.mjs';
 
 const exec = promisify(execFile);
@@ -262,7 +262,9 @@ function stage(label) {
 
 async function expectInputValue(locator, expected) {
     await locator.waitFor();
-    assert.equal(await locator.inputValue(), expected);
+    // Directory changes await persistence before rendering; the fixture's
+    // shared storage is asynchronous, just like extension storage.
+    await expect(locator).toHaveValue(expected, { timeout: 10_000 });
 }
 
 async function waitForCondition(label, predicate) {
