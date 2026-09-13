@@ -1,5 +1,7 @@
 # Paws Agent Chrome
 
+日常快速预发布：暂存本次批准的文件后运行 `pnpm preview:publish --message "变更说明"`。目标一分钟内拿包，完整 CI 后台运行；稳定版流程不变。首次使用与失败处理见[快速流程](docs/fast-preview.md)。仅本地演练加 `--check`，不会推送或发布。
+
 v0.0.7 增加 Agentation 页面批注、预览后批量提问、折叠设置与当前会话跳转。
 Agentation 3.0.2 使用 PolyForm Shield，完整声明见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)；项目 MIT 不替代第三方许可。
 
