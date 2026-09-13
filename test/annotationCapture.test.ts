@@ -39,6 +39,8 @@ it('rejects a cross-paragraph range inside a generic application container', () 
     window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
     expect(captureSelection()).toBeNull();
 });
+// This large DOM regression asserts operation/retention bounds, not wall-clock
+// speed. Shared hosts can exceed Vitest's default 5s while parsing/styling it.
 it.each([false, true])('bounds pre-selection work and retained context with hidden=%s local nodes', hidden => {
     document.body.innerHTML = '<p id="local">' + `<span${hidden ? ' hidden' : ''}>x</span>`.repeat(4000) + 'Native Messaging' + 's'.repeat(20000) + '</p>';
     const text = document.querySelector('#local')!.lastChild!; const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 16);
@@ -52,4 +54,4 @@ it.each([false, true])('bounds pre-selection work and retained context with hidd
         expect(captured?.truncated).toBe(true);
         expect(next.mock.calls.length + previous.mock.calls.length).toBeLessThanOrEqual(2002);
     } finally { next.mockRestore(); previous.mockRestore(); }
-});
+}, 30000);

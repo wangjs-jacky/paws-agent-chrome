@@ -86,6 +86,7 @@ try {
 
     stage('connect SDK and select remote target');
     await bubble.getByText('已连接').waitFor({ timeout: 15_000 });
+    await bubble.getByRole('button', { name: '设置', exact: true }).click();
     const machineOptions = await bubble.getByLabel('远端机器').locator('option').allTextContents();
     assert.deepEqual(machineOptions.slice(0, 2), [
         'E2E Mac mini · 在线',

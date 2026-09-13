@@ -1,9 +1,14 @@
 # Paws Agent Chrome
 
-当前分支增加 Agentation 页面批注批量提问，仅供本地评估，未升级版本或公开发布。
+v0.0.7 增加 Agentation 页面批注、预览后批量提问、折叠设置与当前会话跳转。
 Agentation 3.0.2 使用 PolyForm Shield，完整声明见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)；项目 MIT 不替代第三方许可。
 
+维护者于 2026-09-13 确认已取得本集成的公开发布授权；这不意味着下游使用者自动获得第三方许可之外的授权。
+
 本地验证与合成夹具启动：
+
+快速本地迭代用 `pnpm verify:fast`：类型检查、双进程单测、构建，不运行 Playwright 或 Ego。
+原有 `pnpm verify`、GitHub CI/Release 浏览器检查保持不变；快速检查不代表浏览器验收已通过。
 
 ```bash
 pnpm install --frozen-lockfile

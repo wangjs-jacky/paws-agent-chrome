@@ -1,11 +1,19 @@
 # Paws Agent Chrome
 
-This branch adds local Agentation batch questions. It is a local evaluation
-build, with no version bump or publication authorization. Agentation 3.0.2 uses
+Version 0.0.7 adds Agentation page annotations, previewed batch questions,
+collapsed settings and current-session navigation. Agentation 3.0.2 uses
 PolyForm Shield; see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). The project's MIT
 license does not replace dependency licenses.
 
+The maintainer confirmed authorization to publish this integration on 2026-09-13.
+This does not grant downstream users an exception to the dependency license.
+
 To build and try the synthetic fixture without installing into your usual browser:
+
+For fast local iteration, run `pnpm verify:fast` (typecheck, unit tests with two
+workers, and build). It runs neither Playwright nor Ego. Existing `pnpm verify`
+and GitHub CI/Release browser checks are unchanged; fast verification is not
+browser acceptance.
 
 ```bash
 pnpm install --frozen-lockfile
