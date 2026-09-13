@@ -6,6 +6,7 @@ Markdown rendering with Streamdown, grouped execution details and skill names, p
 
 Codex launches now obtain a fresh session grant. The pinned beta.2 SDK uses a checked-in pnpm patch for grants and image messages; these changes have not yet been migrated to the upstream Happy SDK source. The extension adds permission for its specific OSS attachment host. Replies remain complete-message updates, not token streaming. Unsent image drafts do not survive page refresh.
 
+Fast daily previews: stage approved files, then run `pnpm preview:publish --message "change description"`. Full CI runs asynchronously; stable release gates stay intact. See [fast preview workflow](docs/fast-preview.md). Add `--check` for local-only verification with no publication.
 
 Version 0.0.7 adds Agentation page annotations, previewed batch questions,
 collapsed settings and current-session navigation. Agentation 3.0.2 uses
